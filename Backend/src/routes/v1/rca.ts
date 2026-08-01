@@ -62,7 +62,7 @@ INSTRUCTIONS:
         try {
           const llmRes = await Settings.llm.complete({ prompt: promptText })
           diagnosis = llmRes.text
-        } catch (llmErr: any) {
+        } catch (llmErr) {
           fastify.log.error(llmErr, 'LLM narration error')
           diagnosis = generateFallbackDiagnosis(evidence)
         }
