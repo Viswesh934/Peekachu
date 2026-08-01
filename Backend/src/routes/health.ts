@@ -26,10 +26,23 @@ export default async function healthRoutes(fastify: FastifyInstance) {
       return { error: "ClickHouse client not initialized" };
     }
     const result = await fastify.ch.query({
-      query: "SELECT version() AS version",
+      query: `
+        SELECT 'ad_events' AS table_name, count() AS row_count FROM ad_events
+        UNION ALL
+        SELECT 'apps' AS table_name, count() AS row_count FROM apps
+        UNION ALL
+        SELECT 'advertisers' AS table_name, count() AS row_count FROM advertisers
+        UNION ALL
+        SELECT 'geo_device' AS table_name, count() AS row_count FROM geo_device;
+      `,
       format: "JSONEachRow",
     });
 
-    return result.json();
+    const tables = await result.json();
+
+    return {
+      status: "ok",
+      tables,
+    };
   });
 }

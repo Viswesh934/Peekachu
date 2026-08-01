@@ -32,13 +32,45 @@ export default async function chatRoutes(fastify: FastifyInstance) {
 
     try {
       const index = getIndex();
-      if (!index) {
-        return sendMockResponse(
-          reply,
-          "LlamaIndex is not initialized. Please set DEEPSEEK_API_KEY environment variable in your .env file.",
-          stream,
-          model || "deepseek-chat"
-        );
+      if (!index && Settings.llm) {
+        console.log(`Direct DeepSeek LLM chat turn: "${queryText}"`);
+        const llmResponse = await Settings.llm.complete({ prompt: queryText });
+        const contentText = llmResponse.text;
+
+        if (stream) {
+          reply.raw.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+          });
+          const chunkId = `chatcmpl-${Date.now()}`;
+          reply.raw.write(`data: ${JSON.stringify({
+            id: chunkId,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: model || "deepseek-chat",
+            choices: [{ index: 0, delta: { content: contentText }, finish_reason: null }]
+          })}\n\n`);
+          reply.raw.write(`data: ${JSON.stringify({
+            id: chunkId,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: model || "deepseek-chat",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
+          })}\n\n`);
+          reply.raw.write("data: [DONE]\n\n");
+          reply.raw.end();
+          return;
+        } else {
+          return reply.send({
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000),
+            model: model || "deepseek-chat",
+            choices: [{ index: 0, message: { role: "assistant", content: contentText }, finish_reason: "stop" }]
+          });
+        }
       }
 
       const queryEngine = (index as VectorStoreIndex).asQueryEngine();

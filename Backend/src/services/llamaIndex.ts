@@ -1,4 +1,5 @@
 import path from "path";
+import fs from "fs";
 import { VectorStoreIndex, SimpleDirectoryReader, Settings, DeepSeekLLM, HuggingFaceEmbedding } from "llamaindex";
 
 let index: VectorStoreIndex | null = null;
@@ -28,15 +29,25 @@ export async function initializeIndex(): Promise<boolean> {
       model,
     });
 
-    // Configure HuggingFace local embedding model
-    Settings.embedModel = new HuggingFaceEmbedding();
+    try {
+      // Configure HuggingFace local embedding model
+      Settings.embedModel = new HuggingFaceEmbedding();
 
-    const dataDir = path.resolve(process.cwd(), "data");
-    console.log(`Ingesting documents from directory: ${dataDir}`);
-    const reader = new SimpleDirectoryReader();
-    const documents = await reader.loadData({ directoryPath: dataDir });
-    index = await VectorStoreIndex.fromDocuments(documents);
-    console.log("LlamaIndex successfully initialized with DeepSeek API and vectorized documents.");
+      const dataDir = path.resolve(process.cwd(), "data");
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      console.log(`Ingesting documents from directory: ${dataDir}`);
+      const reader = new SimpleDirectoryReader();
+      const files = fs.readdirSync(dataDir);
+      if (files.length > 0) {
+        const documents = await reader.loadData({ directoryPath: dataDir });
+        index = await VectorStoreIndex.fromDocuments(documents);
+        console.log("LlamaIndex successfully initialized with DeepSeek API and vectorized documents.");
+      }
+    } catch (embedErr) {
+      console.warn("Note: HuggingFaceEmbedding/VectorStoreIndex skipped; Settings.llm initialized for direct narration and chat.", embedErr);
+    }
     return true;
   } catch (error) {
     console.error("Error initializing LlamaIndex with DeepSeek API:", error);
