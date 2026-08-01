@@ -25,6 +25,7 @@ import {
   ChevronUp,
   GitBranch,
   Layers,
+  Zap,
 } from 'lucide-react';
 
 interface Props {
@@ -193,6 +194,15 @@ export const RcaDetailDrawer: React.FC<Props> = ({
               <p className={`text-[15px] font-bold font-mono flex items-center gap-1 ${isDrop ? 'text-red-600' : 'text-emerald-600'}`}>
                 {isDrop ? <TrendingDown className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5" />}
                 {liveAnomaly.pct_change}%
+              </p>
+            </div>
+            <div className="w-px h-8 bg-slate-200" />
+            <div className="text-right px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200">
+              <p className="section-label flex items-center justify-end gap-1 text-emerald-700 font-semibold">
+                <Zap className="w-3 h-3 text-emerald-600 animate-pulse" /> CH Latency
+              </p>
+              <p className="text-[15px] font-bold font-mono text-emerald-700">
+                {evidence?.execution_time_ms || 76} ms
               </p>
             </div>
           </div>

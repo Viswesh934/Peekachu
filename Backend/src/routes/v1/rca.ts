@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { Settings } from 'llamaindex'
+import { trace } from '@opentelemetry/api'
 import { traceRCAInvestigation } from '../../services/langfuseRcaService.js'
 import { getClickHouseService } from '../../services/clickhouse.js'
 import { generateTextEmbedding } from '../../services/embeddingService.js'
@@ -9,6 +10,16 @@ export default async function rcaRoutes(fastify: FastifyInstance) {
   fastify.post('/analyze', async (request, reply) => {
     const { metric, window_start, window_end } = (request.body as any) || {}
     const startTime = Date.now()
+
+    // Enrich active OpenTelemetry trace span with InMobi RCA request attributes
+    const activeSpan = trace.getActiveSpan()
+    if (activeSpan) {
+      activeSpan.setAttribute('inmobi.metric', metric || 'revenue')
+      activeSpan.setAttribute('inmobi.engine_stage', 'rca_analyze')
+      activeSpan.setAttribute('service.name', 'peekachu-rca-backend')
+      if (window_start) activeSpan.setAttribute('inmobi.window_start', window_start)
+      if (window_end) activeSpan.setAttribute('inmobi.window_end', window_end)
+    }
 
     try {
       // 1. Call Go RCA Engine
@@ -32,6 +43,20 @@ export default async function rcaRoutes(fastify: FastifyInstance) {
       }
 
       const evidence = await rcaRes.json()
+
+      if (activeSpan && evidence) {
+        const topSeg = evidence.top_contributing_segments?.[0];
+        if (topSeg) {
+          activeSpan.setAttribute('inmobi.top_segment', `${topSeg.dimension}=${topSeg.value}`);
+          activeSpan.setAttribute('inmobi.share_of_delta', topSeg.share_of_delta);
+        }
+        if (evidence.factor_decomposition?.primary_driver_factor) {
+          activeSpan.setAttribute('inmobi.primary_driver', evidence.factor_decomposition.primary_driver_factor);
+        }
+        if (evidence.z_score !== undefined) {
+          activeSpan.setAttribute('inmobi.z_score', evidence.z_score);
+        }
+      }
 
       // 2. Generate LLM Narration using DeepSeek via LlamaIndex Settings.llm
       let diagnosis = ''

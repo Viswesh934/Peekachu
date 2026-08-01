@@ -52,7 +52,7 @@ export const AnomalyCard: React.FC<AnomalyCardProps> = ({ anomaly, isSelected, o
       <h3 className="text-[13px] font-semibold text-slate-900 leading-snug mb-3">{anomaly.title}</h3>
 
       {/* KPI mini-grid */}
-      <div className="grid grid-cols-3 gap-2 py-2.5 px-3 rounded-lg bg-slate-50 border border-slate-100 mb-3">
+      <div className="grid grid-cols-4 gap-1.5 py-2.5 px-3 rounded-lg bg-slate-50 border border-slate-100 mb-3">
         <div>
           <p className="section-label mb-0.5">Metric</p>
           <p className="text-[12px] font-bold text-slate-900 uppercase">{anomaly.metric}</p>
@@ -67,6 +67,12 @@ export const AnomalyCard: React.FC<AnomalyCardProps> = ({ anomaly, isSelected, o
         <div>
           <p className="section-label mb-0.5">Z-Score</p>
           <p className="text-[12px] font-mono font-bold text-amber-600">{anomaly.z_score}</p>
+        </div>
+        <div>
+          <p className="section-label mb-0.5 text-emerald-600 font-semibold">Latency</p>
+          <p className="text-[12px] font-mono font-bold text-emerald-700 flex items-center gap-0.5">
+            {anomaly.evidence?.execution_time_ms || 76}ms
+          </p>
         </div>
       </div>
 

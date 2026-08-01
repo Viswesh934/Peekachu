@@ -14,8 +14,7 @@ import (
 )
 
 type RCAEngine struct {
-	conn          driver.Conn
-	baselineCache sync.Map
+	conn driver.Conn
 }
 
 const (
@@ -24,9 +23,7 @@ const (
 )
 
 func NewRCAEngine(conn driver.Conn) *RCAEngine {
-	return &RCAEngine{
-		conn: conn,
-	}
+	return &RCAEngine{conn: conn}
 }
 
 // FindTopAnomaly scans the dataset for the most significant anomaly for the specified metric
@@ -241,15 +238,6 @@ func (e *RCAEngine) FindAllAnomalies(ctx context.Context) ([]AnomalyRecord, erro
 }
 
 func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, wEnd string) (map[string]float64, map[string]float64, error) {
-	cacheKey := fmt.Sprintf("base_%s_%s", wStart, wEnd)
-	var cachedBaseMap map[string]float64
-
-	if cached, ok := e.baselineCache.Load(cacheKey); ok {
-		if m, valid := cached.(map[string]float64); valid {
-			cachedBaseMap = m
-		}
-	}
-
 	query := fmt.Sprintf(`
 	WITH current_period AS (
 		SELECT 
@@ -263,11 +251,11 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 	),
 	baseline_period AS (
 		SELECT 
-			count() / nullIf(uniq(toDate(event_time)), 0) AS requests,
-			sum(is_filled) / nullIf(uniq(toDate(event_time)), 0) AS fills,
-			sum(is_impression) / nullIf(uniq(toDate(event_time)), 0) AS impressions,
-			sum(is_click) / nullIf(uniq(toDate(event_time)), 0) AS clicks,
-			sum(revenue) / nullIf(uniq(toDate(event_time)), 0) AS revenue
+			count() / nullIf(uniqExact(toDate(event_time)), 0) AS requests,
+			sum(is_filled) / nullIf(uniqExact(toDate(event_time)), 0) AS fills,
+			sum(is_impression) / nullIf(uniqExact(toDate(event_time)), 0) AS impressions,
+			sum(is_click) / nullIf(uniqExact(toDate(event_time)), 0) AS clicks,
+			sum(revenue) / nullIf(uniqExact(toDate(event_time)), 0) AS revenue
 		FROM ad_events
 		WHERE event_time < '%s' 
 		  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
@@ -302,10 +290,6 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 		"rpr":         safeDiv(curRev, curReq),
 	}
 
-	if cachedBaseMap != nil {
-		return curMap, cachedBaseMap, nil
-	}
-
 	baseMap := map[string]float64{
 		"requests":    baseReq,
 		"fills":       baseFill,
@@ -318,8 +302,6 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 		"ecpm":        safeDiv(baseRev, baseImp) * 1000.0,
 		"rpr":         safeDiv(baseRev, baseReq),
 	}
-
-	e.baselineCache.Store(cacheKey, baseMap)
 
 	return curMap, baseMap, nil
 }
@@ -360,7 +342,147 @@ func (e *RCAEngine) decomposeFactors(cur, base map[string]float64) *FactorDecomp
 }
 
 func (e *RCAEngine) drillDownPrimaryDimensions(ctx context.Context, wStart, wEnd, targetMetric string, totalDelta float64) ([]SegmentContribution, []string) {
-	// Dimensions and SQL expressions
+	// Single-pass GROUP BY GROUPING SETS implementation in ClickHouse for high-throughput primary dimension breakdown
+	curMetricExpr := getMetricSqlExpr(targetMetric)
+	baseMetricExpr := getBaseMetricSqlExpr(targetMetric)
+
+	query := fmt.Sprintf(`
+	WITH current_segs AS (
+		SELECT 
+			multiIf(ad_format != '', 'ad_format',
+			        category != '', 'category',
+			        publisher_tier != '', 'publisher_tier',
+			        vertical != '', 'vertical',
+			        campaign_type != '', 'campaign_type',
+			        region != '', 'region',
+			        country != '', 'country',
+			        device_model != '', 'device_model',
+			        'os_version') AS dim_name,
+			coalesce(nullIf(ad_format,''), nullIf(category,''), nullIf(publisher_tier,''), nullIf(vertical,''), nullIf(campaign_type,''), nullIf(region,''), nullIf(country,''), nullIf(device_model,''), nullIf(os_version,'')) AS dim_val,
+			%s AS cur_metric
+		FROM (
+			SELECT 
+				ad_format,
+				dictGet('apps_dict', 'category', app_id) AS category,
+				dictGet('apps_dict', 'publisher_tier', app_id) AS publisher_tier,
+				dictGet('advertisers_dict', 'vertical', assumeNotNull(advertiser_id)) AS vertical,
+				dictGet('advertisers_dict', 'campaign_type', assumeNotNull(advertiser_id)) AS campaign_type,
+				dictGet('geo_device_dict', 'region', geo_device_id) AS region,
+				dictGet('geo_device_dict', 'country', geo_device_id) AS country,
+				dictGet('geo_device_dict', 'device_model', geo_device_id) AS device_model,
+				dictGet('geo_device_dict', 'os_version', geo_device_id) AS os_version
+			FROM ad_events
+			WHERE event_time >= '%s' AND event_time < '%s'
+		)
+		GROUP BY GROUPING SETS (
+			(ad_format), (category), (publisher_tier), (vertical), (campaign_type),
+			(region), (country), (device_model), (os_version)
+		)
+	),
+	base_segs AS (
+		SELECT 
+			multiIf(ad_format != '', 'ad_format',
+			        category != '', 'category',
+			        publisher_tier != '', 'publisher_tier',
+			        vertical != '', 'vertical',
+			        campaign_type != '', 'campaign_type',
+			        region != '', 'region',
+			        country != '', 'country',
+			        device_model != '', 'device_model',
+			        'os_version') AS dim_name,
+			coalesce(nullIf(ad_format,''), nullIf(category,''), nullIf(publisher_tier,''), nullIf(vertical,''), nullIf(campaign_type,''), nullIf(region,''), nullIf(country,''), nullIf(device_model,''), nullIf(os_version,'')) AS dim_val,
+			%s AS base_metric
+		FROM (
+			SELECT 
+				ad_format,
+				dictGet('apps_dict', 'category', app_id) AS category,
+				dictGet('apps_dict', 'publisher_tier', app_id) AS publisher_tier,
+				dictGet('advertisers_dict', 'vertical', assumeNotNull(advertiser_id)) AS vertical,
+				dictGet('advertisers_dict', 'campaign_type', assumeNotNull(advertiser_id)) AS campaign_type,
+				dictGet('geo_device_dict', 'region', geo_device_id) AS region,
+				dictGet('geo_device_dict', 'country', geo_device_id) AS country,
+				dictGet('geo_device_dict', 'device_model', geo_device_id) AS device_model,
+				dictGet('geo_device_dict', 'os_version', geo_device_id) AS os_version
+			FROM ad_events
+			WHERE event_time < '%s' 
+			  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
+			  AND toHour(event_time) >= toHour(toDateTime('%s'))
+			  AND toHour(event_time) < toHour(toDateTime('%s'))
+		)
+		GROUP BY GROUPING SETS (
+			(ad_format), (category), (publisher_tier), (vertical), (campaign_type),
+			(region), (country), (device_model), (os_version)
+		)
+	)
+	SELECT 
+		coalesce(c.dim_name, b.dim_name) AS dim_name,
+		coalesce(c.dim_val, b.dim_val) AS dim_val,
+		toFloat64(coalesce(c.cur_metric, 0)) AS current_m,
+		toFloat64(coalesce(b.base_metric, 0)) AS base_m
+	FROM current_segs c FULL OUTER JOIN base_segs b 
+	  ON c.dim_name = b.dim_name AND c.dim_val = b.dim_val
+	ORDER BY abs(current_m - base_m) DESC;
+	`, curMetricExpr, wStart, wEnd, baseMetricExpr, wStart, wStart, wStart, wEnd)
+
+	rows, err := e.conn.Query(ctx, query)
+	if err != nil {
+		// Fallback to bounded concurrency fan-out if GROUPING SETS query encounters issue
+		return e.fallbackParallelDrillDown(ctx, wStart, wEnd, targetMetric, totalDelta)
+	}
+	defer rows.Close()
+
+	var results []SegmentContribution
+	maxSharePerDim := make(map[string]float64)
+
+	for rows.Next() {
+		var dimName, val string
+		var cur, base float64
+		if err := rows.Scan(&dimName, &val, &cur, &base); err != nil {
+			continue
+		}
+		if val == "" {
+			val = "Unfilled / Unknown"
+		}
+
+		delta := cur - base
+		share := 0.0
+		if math.Abs(totalDelta) > 0.0001 {
+			share = delta / totalDelta
+			if share > 1.0 {
+				share = 1.0
+			} else if share < -1.0 {
+				share = -1.0
+			}
+		}
+
+		if math.Abs(share) > maxSharePerDim[dimName] {
+			maxSharePerDim[dimName] = math.Abs(share)
+		}
+
+		if math.Abs(share) >= 0.10 {
+			results = append(results, SegmentContribution{
+				Dimension:     dimName,
+				Value:         val,
+				CurrentMetric: math.Round(cur*100) / 100,
+				BaseMetric:    math.Round(base*100) / 100,
+				SegmentDelta:  math.Round(delta*100) / 100,
+				ShareOfDelta:  math.Round(share*1000) / 1000,
+			})
+		}
+	}
+
+	allDims := []string{"ad_format", "category", "publisher_tier", "vertical", "campaign_type", "region", "country", "device_model", "os_version"}
+	var ruledOutDims []string
+	for _, d := range allDims {
+		if maxSharePerDim[d] < 0.08 {
+			ruledOutDims = append(ruledOutDims, d)
+		}
+	}
+
+	return results, ruledOutDims
+}
+
+func (e *RCAEngine) fallbackParallelDrillDown(ctx context.Context, wStart, wEnd, targetMetric string, totalDelta float64) ([]SegmentContribution, []string) {
 	dims := []struct {
 		Name string
 		Expr string
@@ -380,8 +502,7 @@ func (e *RCAEngine) drillDownPrimaryDimensions(ctx context.Context, wStart, wEnd
 	var ruledOutDims []string
 	var mu sync.Mutex
 
-	// Bounded Concurrency Semaphore (max 16 parallel worker queries)
-	sem := make(chan struct{}, 16)
+	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
 
 	for _, d := range dims {
@@ -424,7 +545,7 @@ func getBaseMetricSqlExpr(metric string) string {
 	if metric == "fill_rate" || metric == "ecpm" || metric == "render_rate" || metric == "ctr" {
 		return expr
 	}
-	return fmt.Sprintf("(%s) / nullIf(uniq(toDate(event_time)), 0)", expr)
+	return fmt.Sprintf("(%s) / nullIf(uniqExact(toDate(event_time)), 0)", expr)
 }
 
 func getContributionMetricExpr(metric string) string {
