@@ -55,7 +55,7 @@ export class ClickHouseMCPLLMClient {
   public async listTools(): Promise<MCPToolInfo[]> {
     await this.connect();
     const res = await this.client!.listTools();
-    return res.tools.map((t) => ({
+    return res.tools.map((t: any) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema as Record<string, unknown>,

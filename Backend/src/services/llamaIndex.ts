@@ -15,7 +15,9 @@ export function isIndexInitialized(): boolean {
 export async function initializeIndex(): Promise<boolean> {
   const apiKey = process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    console.warn("WARNING: DEEPSEEK_API_KEY environment variable is not set. LlamaIndex index creation skipped until key is provided.");
+    console.warn(
+      "WARNING: DEEPSEEK_API_KEY environment variable is not set. LlamaIndex index creation skipped until key is provided.",
+    );
     return false;
   }
 

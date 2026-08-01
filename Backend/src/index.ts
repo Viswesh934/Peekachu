@@ -1,6 +1,7 @@
 import './instrumentation.js';
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import path from "path";
 import dotenv from "dotenv";
 import clickhousePlugin from "./clickClient.js";
 import { initializeIndex } from "./services/llamaIndex.js";
@@ -10,8 +11,11 @@ import modelsRoutes from "./routes/v1/models.js";
 import chatRoutes from "./routes/v1/chat.js";
 import rcaRoutes from "./routes/v1/rca.js";
 import simulationRoutes from "./routes/simulation.js";
+import deepseekRoutes from "./routes/v1/deepseek.js";
 
+// Load environment variables from local or root directory
 dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
 
 const fastify = Fastify({
   logger: true,
@@ -32,6 +36,7 @@ await fastify.register(modelsRoutes);
 await fastify.register(chatRoutes);
 await fastify.register(rcaRoutes);
 await fastify.register(simulationRoutes);
+await fastify.register(deepseekRoutes);
 
 // Start Server
 const PORT = parseInt(process.env.PORT || "5001", 10);
