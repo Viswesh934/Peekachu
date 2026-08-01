@@ -65,31 +65,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {!collapsed ? 'Core Engine Modules' : 'Menu'}
         </div>
 
-        {/* Dashboard Link */}
-        <button
-          onClick={() => setActiveModule('dashboard')}
-          className={`w-full flex items-center gap-3.5 px-3 py-3 rounded-xl font-medium text-sm transition-all duration-200 ${
-            activeModule === 'dashboard'
-              ? 'bg-brand-600 text-white shadow-lg shadow-brand-600/25 border border-brand-500/30'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-          }`}
-        >
-          <LayoutDashboard className={`w-5 h-5 shrink-0 ${activeModule === 'dashboard' ? 'text-white' : 'text-slate-400'}`} />
-          {!collapsed && <span className="truncate">Dashboard</span>}
-        </button>
-
         {/* RCA Module Link */}
         <button
           onClick={() => setActiveModule('rca')}
-          className={`w-full flex items-center justify-between px-3 py-3 rounded-xl font-medium text-sm transition-all duration-200 ${
+          className={`w-full flex items-center gap-3.5 px-3 py-3 rounded-xl font-medium text-sm transition-all duration-200 ${
             activeModule === 'rca'
               ? 'bg-brand-600 text-white shadow-lg shadow-brand-600/25 border border-brand-500/30'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
           }`}
         >
+          <BrainCircuit className={`w-5 h-5 shrink-0 ${activeModule === 'rca' ? 'text-white' : 'text-amber-400'}`} />
+          {!collapsed && <span className="truncate">RCA & Human Loop</span>}
+        </button>
+
+        {/* Secondary Dashboard Link */}
+        <button
+          onClick={() => setActiveModule('dashboard')}
+          className={`w-full flex items-center justify-between px-3 py-3 rounded-xl font-medium text-sm transition-all duration-200 ${
+            activeModule === 'dashboard'
+              ? 'bg-brand-600 text-white shadow-lg shadow-brand-600/25 border border-brand-500/30'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
           <div className="flex items-center gap-3.5 overflow-hidden">
-            <BrainCircuit className={`w-5 h-5 shrink-0 ${activeModule === 'rca' ? 'text-white' : 'text-amber-400'}`} />
-            {!collapsed && <span className="truncate">RCA & Human Loop</span>}
+            <LayoutDashboard className={`w-5 h-5 shrink-0 ${activeModule === 'dashboard' ? 'text-white' : 'text-slate-400'}`} />
+            {!collapsed && <span className="truncate">Secondary Dashboard</span>}
           </div>
 
           {!collapsed && pendingCount > 0 && (

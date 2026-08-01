@@ -8,7 +8,7 @@ import { INITIAL_METRICS_SUMMARY, INITIAL_ANOMALIES, HOURLY_TIME_SERIES } from '
 import { fetchAnomalies } from './services/api';
 
 export function App() {
-  const [activeModule, setActiveModule] = useState<ModuleType>('dashboard');
+  const [activeModule, setActiveModule] = useState<ModuleType>('rca');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [anomalies, setAnomalies] = useState<AnomalyIncident[]>(INITIAL_ANOMALIES);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -97,18 +97,18 @@ export function App() {
         />
 
         <main className="flex-1 overflow-y-auto p-6">
-          {activeModule === 'dashboard' ? (
+          {activeModule === 'rca' ? (
+            <RcaView
+              anomalies={anomalies}
+              onApprove={handleApprove}
+              onFlagHallucination={handleFlagHallucination}
+            />
+          ) : (
             <DashboardView
               metrics={INITIAL_METRICS_SUMMARY}
               timeSeries={HOURLY_TIME_SERIES}
               onNavigateToRca={() => setActiveModule('rca')}
               pendingRcaCount={pendingCount}
-            />
-          ) : (
-            <RcaView
-              anomalies={anomalies}
-              onApprove={handleApprove}
-              onFlagHallucination={handleFlagHallucination}
             />
           )}
         </main>
