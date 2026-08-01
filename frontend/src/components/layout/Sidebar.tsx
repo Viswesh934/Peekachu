@@ -8,6 +8,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Database,
+  Bot,
+  Sparkles,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -43,6 +45,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: LayoutDashboard,
       badge: null,
       badgeVariant: 'blue' as const,
+    },
+    {
+      id: 'librechat' as ModuleType,
+      label: 'Pika',
+      sublabel: 'LibreChat MCP Assistant',
+      icon: Sparkles,
+      badge: 'AI',
+      badgeVariant: 'emerald' as const,
     },
   ];
 

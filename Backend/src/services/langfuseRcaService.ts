@@ -53,8 +53,8 @@ export interface RCATraceResult {
 export function evaluateFaithfulness(
   diagnosisText: string,
   evidence: RCAEvidenceBundle
-): { score: number; numbersInDiagnosis: number[]; unsupportedNumbers: number[] } {
-  if (!diagnosisText) return { score: 1.0, numbersInDiagnosis: [], unsupportedNumbers: [] };
+): { score: number; numbersInDiagnosis: number[]; unsupportedNumbers: number[]; hallucinationDetected: boolean } {
+  if (!diagnosisText) return { score: 1.0, numbersInDiagnosis: [], unsupportedNumbers: [], hallucinationDetected: false };
 
   // Flatten all numeric values from evidence bundle into a set of known numbers
   const knownNumbers = new Set<number>();
@@ -133,16 +133,18 @@ export function evaluateFaithfulness(
   }
 
   if (numbersInDiagnosis.length === 0) {
-    return { score: 1.0, numbersInDiagnosis: [], unsupportedNumbers: [] };
+    return { score: 1.0, numbersInDiagnosis: [], unsupportedNumbers: [], hallucinationDetected: false };
   }
 
   const supportedCount = numbersInDiagnosis.length - unsupportedNumbers.length;
   const score = Math.max(0, Math.min(1.0, supportedCount / numbersInDiagnosis.length));
+  const hallucinationDetected = unsupportedNumbers.length > 0;
 
   return {
     score: Math.round(score * 100) / 100,
     numbersInDiagnosis,
     unsupportedNumbers,
+    hallucinationDetected,
   };
 }
 

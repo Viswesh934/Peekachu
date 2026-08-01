@@ -11,6 +11,7 @@ interface HeaderProps {
 const MODULE_TITLES: Record<ModuleType, { title: string; sub: string }> = {
   rca:       { title: 'Root Cause Analysis',  sub: 'Human-in-the-Loop Verification' },
   dashboard: { title: 'Event Stream Dashboard', sub: 'Live AdTech Metrics Monitor' },
+  librechat: { title: 'Pika', sub: 'ClickHouse MCP & DeepSeek AI Agent' },
 };
 
 export const Header: React.FC<HeaderProps> = ({ activeModule, anomaliesCount, pendingCount }) => {
@@ -22,7 +23,7 @@ export const Header: React.FC<HeaderProps> = ({ activeModule, anomaliesCount, pe
       <div className="flex items-center gap-2 text-[13px] min-w-0">
         <span className="text-slate-400 font-medium hidden sm:block">ClickHouse</span>
         <ChevronRight className="w-3.5 h-3.5 text-slate-300 hidden sm:block shrink-0" />
-        <span className="text-slate-500 font-medium hidden sm:block">AdTech RCA</span>
+        <span className="text-slate-500 font-medium hidden sm:block">Peekachu RCA</span>
         <ChevronRight className="w-3.5 h-3.5 text-slate-300 hidden sm:block shrink-0" />
         <div className="min-w-0">
           <span className="font-semibold text-slate-900 block leading-tight truncate">{title}</span>

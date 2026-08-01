@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { MetricSummary, TimeSeriesPoint, FilterState } from '../../types';
+import { MetricSummary, TimeSeriesPoint } from '../../types';
 import { MetricCard } from './MetricCard';
 import { MetricCharts } from './MetricCharts';
-import { FilterBar } from './FilterBar';
 import { LiveEventStream } from './LiveEventStream';
 import { fetchDashboardSummary, fetchDashboardTimeSeries } from '../../services/api';
 import {
@@ -33,15 +32,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
   const [timeSeries, setTimeSeries] = useState<TimeSeriesPoint[]>(initialTimeSeries || []);
 
-  const [filters, setFilters] = useState<FilterState>({
-    timeRange: 'last_24h',
-    appCategory: 'all',
-    vertical: 'all',
-    region: 'all',
-    adFormat: 'all',
-    deviceModel: 'all',
-  });
-
   useEffect(() => {
     fetchDashboardSummary().then((data) => {
       if (data) setMetrics(data);
@@ -50,17 +40,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       if (data && data.length > 0) setTimeSeries(data);
     });
   }, []);
-
-  const handleResetFilters = () => {
-    setFilters({
-      timeRange: 'last_24h',
-      appCategory: 'all',
-      vertical: 'all',
-      region: 'all',
-      adFormat: 'all',
-      deviceModel: 'all',
-    });
-  };
 
   return (
     <div className="space-y-5 pb-12">
@@ -95,9 +74,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
       )}
-
-      {/* Filter Bar */}
-      <FilterBar filters={filters} setFilters={setFilters} onReset={handleResetFilters} />
 
       {/* KPI Metric Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

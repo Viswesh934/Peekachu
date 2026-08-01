@@ -144,7 +144,6 @@ func (e *RCAEngine) PerformAnalysis(ctx context.Context, req AnalyzeRequest) (*R
 			wEnd = t.Add(1 * time.Hour).Format("2006-01-02 15:04:05")
 		}
 
-		// Calculate metrics for window
 		t, _ := time.Parse("2006-01-02 15:04:05", wStart)
 		anomaly = &AnomalyRecord{
 			Timestamp: t,
@@ -152,8 +151,27 @@ func (e *RCAEngine) PerformAnalysis(ctx context.Context, req AnalyzeRequest) (*R
 		}
 	}
 
+	tStart, errStart := time.Parse("2006-01-02 15:04:05", wStart)
+	tEnd, errEnd := time.Parse("2006-01-02 15:04:05", wEnd)
+	if errStart != nil || errEnd != nil || !tEnd.After(tStart) {
+		if errStart == nil {
+			tEnd = tStart.Add(1 * time.Hour)
+			wEnd = tEnd.Format("2006-01-02 15:04:05")
+		} else {
+			tStart = time.Now().Add(-1 * time.Hour)
+			tEnd = time.Now()
+			wStart = tStart.Format("2006-01-02 15:04:05")
+			wEnd = tEnd.Format("2006-01-02 15:04:05")
+		}
+	}
+	duration := tEnd.Sub(tStart)
+
+	// Compute baseline time window (same duration, 7 days prior)
+	bStart := tStart.Add(-7 * 24 * time.Hour).Format("2006-01-02 15:04:05")
+	bEnd := tEnd.Add(-7 * 24 * time.Hour).Format("2006-01-02 15:04:05")
+
 	// 1. Fetch Window vs Baseline Metrics
-	currentMetrics, baseMetrics, err := e.getMetricsForWindowAndBaseline(ctx, wStart, wEnd)
+	currentMetrics, baseMetrics, err := e.getMetricsForWindowAndBaseline(ctx, wStart, wEnd, bStart, bEnd, duration)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query metrics: %w", err)
 	}
@@ -161,10 +179,7 @@ func (e *RCAEngine) PerformAnalysis(ctx context.Context, req AnalyzeRequest) (*R
 	curVal := currentMetrics[metric]
 	baseVal := baseMetrics[metric]
 	delta := curVal - baseVal
-	pctChange := 0.0
-	if baseVal != 0 {
-		pctChange = (delta / baseVal) * 100.0
-	}
+	pctChange := safePctChange(curVal, baseVal)
 
 	// 2. Revenue Identity Factor Decomposition
 	var factorDecomp *FactorDecomposition
@@ -199,9 +214,13 @@ func (e *RCAEngine) PerformAnalysis(ctx context.Context, req AnalyzeRequest) (*R
 	ruledOutList := e.buildRuledOut(factorDecomp, ruledOutDims, currentMetrics, baseMetrics)
 
 	execMs := time.Since(startTime).Milliseconds()
+	anomalyDetected := math.Abs(anomaly.ZScore) > anomalyZThreshold || math.Abs(pctChange) > positivePctThreshold
+	if baseVal == 0 && curVal > 0 {
+		anomalyDetected = true
+	}
 
 	return &RCAEvidence{
-		AnomalyDetected:         math.Abs(anomaly.ZScore) > anomalyZThreshold || math.Abs(pctChange) > positivePctThreshold,
+		AnomalyDetected:         anomalyDetected,
 		Metric:                  metric,
 		WindowStart:             wStart,
 		WindowEnd:               wEnd,
@@ -239,7 +258,7 @@ func (e *RCAEngine) FindAllAnomalies(ctx context.Context) ([]AnomalyRecord, erro
 	return results, nil
 }
 
-func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, wEnd string) (map[string]float64, map[string]float64, error) {
+func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, wEnd, bStart, bEnd string, dur time.Duration) (map[string]float64, map[string]float64, error) {
 	query := fmt.Sprintf(`
 	WITH current_period AS (
 		SELECT 
@@ -253,22 +272,19 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 	),
 	baseline_period AS (
 		SELECT 
-			count() / nullIf(uniqExact(toDate(event_time)), 0) AS requests,
-			sum(is_filled) / nullIf(uniqExact(toDate(event_time)), 0) AS fills,
-			sum(is_impression) / nullIf(uniqExact(toDate(event_time)), 0) AS impressions,
-			sum(is_click) / nullIf(uniqExact(toDate(event_time)), 0) AS clicks,
-			sum(revenue) / nullIf(uniqExact(toDate(event_time)), 0) AS revenue
+			count() AS requests,
+			sum(is_filled) AS fills,
+			sum(is_impression) AS impressions,
+			sum(is_click) AS clicks,
+			sum(revenue) AS revenue
 		FROM ad_events
-		WHERE event_time < '%s' 
-		  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
-		  AND toHour(event_time) >= toHour(toDateTime('%s'))
-		  AND toHour(event_time) < toHour(toDateTime('%s'))
+		WHERE event_time >= '%s' AND event_time < '%s'
 	)
 	SELECT 
 		toFloat64(c.requests), toFloat64(c.fills), toFloat64(c.impressions), toFloat64(c.clicks), toFloat64(c.revenue),
 		toFloat64(b.requests), toFloat64(b.fills), toFloat64(b.impressions), toFloat64(b.clicks), toFloat64(b.revenue)
 	FROM current_period c CROSS JOIN baseline_period b;
-	`, wStart, wEnd, wStart, wStart, wStart, wEnd)
+	`, wStart, wEnd, bStart, bEnd)
 
 	row := e.conn.QueryRow(ctx, query)
 
@@ -277,6 +293,26 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 
 	if err := row.Scan(&curReq, &curFill, &curImp, &curClick, &curRev, &baseReq, &baseFill, &baseImp, &baseClick, &baseRev); err != nil {
 		return nil, nil, err
+	}
+
+	// Fallback to immediately preceding interval if 7 days prior has no events
+	if baseReq == 0 && baseRev == 0 {
+		tStart, _ := time.Parse("2006-01-02 15:04:05", wStart)
+		altBStart := tStart.Add(-dur).Format("2006-01-02 15:04:05")
+		altBEnd := wStart
+
+		queryAlt := fmt.Sprintf(`
+		SELECT 
+			toFloat64(count()) AS requests,
+			toFloat64(sum(is_filled)) AS fills,
+			toFloat64(sum(is_impression)) AS impressions,
+			toFloat64(sum(is_click)) AS clicks,
+			toFloat64(sum(revenue)) AS revenue
+		FROM ad_events
+		WHERE event_time >= '%s' AND event_time < '%s'
+		`, altBStart, altBEnd)
+		rowAlt := e.conn.QueryRow(ctx, queryAlt)
+		_ = rowAlt.Scan(&baseReq, &baseFill, &baseImp, &baseClick, &baseRev)
 	}
 
 	curMap := map[string]float64{
@@ -783,7 +819,13 @@ func safeDiv(a, b float64) float64 {
 
 func safePctChange(cur, base float64) float64 {
 	if base == 0 {
-		return 0
+		if cur > 0 {
+			return 100.0
+		}
+		if cur < 0 {
+			return -100.0
+		}
+		return 0.0
 	}
 	return ((cur - base) / base) * 100.0
 }

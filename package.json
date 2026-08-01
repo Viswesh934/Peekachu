@@ -1,0 +1,16 @@
+{
+  "name": "peekachu-rca-platform",
+  "version": "1.0.0",
+  "description": "Peekachu RCA Platform - One command runner for Frontend, Backend, Go RCA Engine & LibreChat Docker",
+  "scripts": {
+    "start": "npm run docker:up && npm run dev",
+    "dev": "npx concurrently -n \"ENGINE,BACKEND,FRONTEND\" -c \"magenta.bold,cyan.bold,green.bold\" \"npm run dev:engine\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "docker:up": "cd LibreChat && docker compose -f deploy-compose.yml -f docker-compose.override.yml up -d",
+    "dev:engine": "cd Engine && go run .",
+    "dev:backend": "cd Backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.4"
+  }
+}

@@ -8,13 +8,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
 func main() {
 	port := os.Getenv("RCA_ENGINE_PORT")
 	if port == "" {
-		port = "8081"
+		port = "8082"
 	}
 
 	conn, err := ConnectClickHouse()
@@ -91,7 +92,7 @@ func main() {
 		json.NewEncoder(w).Encode(anomaly)
 	})
 
-	addr := fmt.Sprintf(":%s", port)
+	addr := fmt.Sprintf(":%s", strings.TrimSpace(port))
 	log.Printf("🚀 Go RCA Engine listening on http://localhost%s", addr)
 	server := &http.Server{
 		Addr:         addr,

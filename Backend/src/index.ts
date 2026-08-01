@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import path from "path";
 import dotenv from "dotenv";
+import httpProxy from "@fastify/http-proxy";
 import clickhousePlugin from "./clickClient.js";
 import { initializeIndex } from "./services/llamaIndex.js";
 import rootRoutes from "./routes/root.js";
@@ -28,6 +29,15 @@ await fastify.register(cors, {
   origin: "*",
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+});
+
+// Proxy Frontend -> Backend -> LibreChat
+const librechatTarget = process.env.LIBRECHAT_URL || "http://localhost:3080";
+await fastify.register(httpProxy, {
+  upstream: librechatTarget,
+  prefix: "/librechat",
+  rewritePrefix: "/",
+  http2: false,
 });
 
 // Register plugins and routes

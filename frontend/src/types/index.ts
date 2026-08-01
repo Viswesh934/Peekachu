@@ -1,4 +1,4 @@
-export type ModuleType = 'dashboard' | 'rca';
+export type ModuleType = 'dashboard' | 'rca' | 'librechat';
 
 export type AnomalySeverity = 'CRITICAL' | 'MAJOR' | 'WARNING';
 

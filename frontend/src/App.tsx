@@ -6,6 +6,8 @@ import { DashboardView } from './components/dashboard/DashboardView';
 import { RcaView } from './components/rca/RcaView';
 import { fetchAnomalies, approveRcaFinding } from './services/api';
 
+import { LibreChatView } from './components/librechat/LibreChatView';
+
 export function App() {
   const [activeModule, setActiveModule] = useState<ModuleType>('rca');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -107,17 +109,21 @@ export function App() {
           />
 
           <main className="flex-1 overflow-y-auto p-5 min-h-0 bg-slate-50">
-            {activeModule === 'rca' ? (
+            {activeModule === 'rca' && (
               <RcaView
                 anomalies={anomalies}
                 onApprove={handleApprove}
                 onFlagHallucination={handleFlagHallucination}
               />
-            ) : (
+            )}
+            {activeModule === 'dashboard' && (
               <DashboardView
                 onNavigateToRca={() => setActiveModule('rca')}
                 pendingRcaCount={pendingCount}
               />
+            )}
+            {activeModule === 'librechat' && (
+              <LibreChatView />
             )}
           </main>
         </div>
