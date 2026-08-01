@@ -14,7 +14,8 @@ import (
 )
 
 type RCAEngine struct {
-	conn driver.Conn
+	conn          driver.Conn
+	baselineCache sync.Map
 }
 
 const (
@@ -23,7 +24,9 @@ const (
 )
 
 func NewRCAEngine(conn driver.Conn) *RCAEngine {
-	return &RCAEngine{conn: conn}
+	return &RCAEngine{
+		conn: conn,
+	}
 }
 
 // FindTopAnomaly scans the dataset for the most significant anomaly for the specified metric
@@ -238,6 +241,15 @@ func (e *RCAEngine) FindAllAnomalies(ctx context.Context) ([]AnomalyRecord, erro
 }
 
 func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, wEnd string) (map[string]float64, map[string]float64, error) {
+	cacheKey := fmt.Sprintf("base_%s_%s", wStart, wEnd)
+	var cachedBaseMap map[string]float64
+
+	if cached, ok := e.baselineCache.Load(cacheKey); ok {
+		if m, valid := cached.(map[string]float64); valid {
+			cachedBaseMap = m
+		}
+	}
+
 	query := fmt.Sprintf(`
 	WITH current_period AS (
 		SELECT 
@@ -251,11 +263,11 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 	),
 	baseline_period AS (
 		SELECT 
-			count() / nullIf(uniqExact(toDate(event_time)), 0) AS requests,
-			sum(is_filled) / nullIf(uniqExact(toDate(event_time)), 0) AS fills,
-			sum(is_impression) / nullIf(uniqExact(toDate(event_time)), 0) AS impressions,
-			sum(is_click) / nullIf(uniqExact(toDate(event_time)), 0) AS clicks,
-			sum(revenue) / nullIf(uniqExact(toDate(event_time)), 0) AS revenue
+			count() / nullIf(uniq(toDate(event_time)), 0) AS requests,
+			sum(is_filled) / nullIf(uniq(toDate(event_time)), 0) AS fills,
+			sum(is_impression) / nullIf(uniq(toDate(event_time)), 0) AS impressions,
+			sum(is_click) / nullIf(uniq(toDate(event_time)), 0) AS clicks,
+			sum(revenue) / nullIf(uniq(toDate(event_time)), 0) AS revenue
 		FROM ad_events
 		WHERE event_time < '%s' 
 		  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
@@ -290,6 +302,10 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 		"rpr":         safeDiv(curRev, curReq),
 	}
 
+	if cachedBaseMap != nil {
+		return curMap, cachedBaseMap, nil
+	}
+
 	baseMap := map[string]float64{
 		"requests":    baseReq,
 		"fills":       baseFill,
@@ -302,6 +318,8 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 		"ecpm":        safeDiv(baseRev, baseImp) * 1000.0,
 		"rpr":         safeDiv(baseRev, baseReq),
 	}
+
+	e.baselineCache.Store(cacheKey, baseMap)
 
 	return curMap, baseMap, nil
 }
@@ -362,8 +380,8 @@ func (e *RCAEngine) drillDownPrimaryDimensions(ctx context.Context, wStart, wEnd
 	var ruledOutDims []string
 	var mu sync.Mutex
 
-	// Bounded Concurrency Semaphore (max 8 parallel worker queries)
-	sem := make(chan struct{}, 8)
+	// Bounded Concurrency Semaphore (max 16 parallel worker queries)
+	sem := make(chan struct{}, 16)
 	var wg sync.WaitGroup
 
 	for _, d := range dims {
@@ -406,7 +424,7 @@ func getBaseMetricSqlExpr(metric string) string {
 	if metric == "fill_rate" || metric == "ecpm" || metric == "render_rate" || metric == "ctr" {
 		return expr
 	}
-	return fmt.Sprintf("(%s) / nullIf(uniqExact(toDate(event_time)), 0)", expr)
+	return fmt.Sprintf("(%s) / nullIf(uniq(toDate(event_time)), 0)", expr)
 }
 
 func getContributionMetricExpr(metric string) string {

@@ -63,7 +63,10 @@ func ConnectClickHouse() (driver.Conn, error) {
 			Username: username,
 			Password: password,
 		},
-		DialTimeout: 10 * time.Second,
+		DialTimeout:     5 * time.Second,
+		MaxOpenConns:    32,
+		MaxIdleConns:    16,
+		ConnMaxLifetime: 10 * time.Minute,
 	}
 
 	if useHTTP {

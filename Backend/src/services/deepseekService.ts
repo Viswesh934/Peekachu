@@ -97,8 +97,8 @@ export async function executeDeepSeekCompletion(
   const {
     messages,
     model = getDeepSeekModel(),
-    temperature = 0.7,
-    max_tokens,
+    temperature = 0.1,
+    max_tokens = 450,
     userId = "anon-user",
     sessionId,
     tags = ["fastify", "deepseek"],
