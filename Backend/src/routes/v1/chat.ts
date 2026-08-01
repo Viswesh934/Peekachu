@@ -1,5 +1,5 @@
 import { FastifyInstance } from "fastify";
-import { VectorStoreIndex } from "llamaindex";
+import { VectorStoreIndex, Settings } from "llamaindex";
 import { getIndex } from "../../services/llamaIndex.js";
 import { sendMockResponse } from "../../utils/mockResponse.js";
 
