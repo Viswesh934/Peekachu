@@ -1,6 +1,8 @@
 import { FastifyInstance } from 'fastify'
 import { Settings } from 'llamaindex'
 import { traceRCAInvestigation } from '../../services/langfuseRcaService.js'
+import { getClickHouseService } from '../../services/clickhouse.js'
+import { generateTextEmbedding } from '../../services/embeddingService.js'
 
 export default async function rcaRoutes(fastify: FastifyInstance) {
   // Analyze endpoint connecting Fastify -> Go RCA Engine -> DeepSeek Narrator -> Telemetry
@@ -114,6 +116,88 @@ INSTRUCTIONS:
     } catch (err: any) {
       reply.status(500)
       return { error: err.message }
+    }
+  })
+
+  // Approve finding and store vector embeddings + metadata into ClickHouse
+  fastify.post('/approve', async (request, reply) => {
+    const {
+      id,
+      metric = 'revenue',
+      title,
+      diagnosisText,
+      window_start,
+      window_end,
+      baseline_value,
+      current_value,
+      pct_change,
+      z_score,
+      evidence,
+      reviewedBy = 'Umesh (AdOps Lead)',
+    } = (request.body as any) || {}
+
+    try {
+      const chService = getClickHouseService()
+
+      // Create approved_rca_embeddings table storing vector embeddings in ClickHouse
+      await chService.exec(`
+        CREATE TABLE IF NOT EXISTS approved_rca_embeddings (
+          id String,
+          metric String,
+          title String,
+          summary String,
+          embedding Array(Float32),
+          metadata String,
+          created_at DateTime DEFAULT now()
+        ) ENGINE = MergeTree()
+        ORDER BY (metric, id);
+      `)
+
+      const summaryText = `${title || 'Approved Anomaly'}. Metric: ${metric}. Window: ${window_start} to ${window_end}. Baseline: ${baseline_value}, Current: ${current_value}, Pct Change: ${pct_change}%, Z-Score: ${z_score}. Diagnosis: ${diagnosisText}`
+      
+      // Generate 384-dim float vector embedding for the finding
+      const vector = await generateTextEmbedding(summaryText)
+
+      const metadataObj = {
+        window_start,
+        window_end,
+        baseline_value,
+        current_value,
+        pct_change,
+        z_score,
+        evidence: evidence || {},
+        reviewed_by: reviewedBy,
+      }
+
+      // Insert vector embedding record into ClickHouse
+      await chService.insert('approved_rca_embeddings', [
+        {
+          id: id || `INC-${Date.now()}`,
+          metric: String(metric),
+          title: String(title || 'Approved Anomaly Finding'),
+          summary: String(summaryText),
+          embedding: vector,
+          metadata: JSON.stringify(metadataObj),
+        },
+      ])
+
+      fastify.log.info(`Approved RCA finding vector embedding stored in ClickHouse table 'approved_rca_embeddings': ${id}`)
+
+      return {
+        success: true,
+        stored_in_clickhouse: true,
+        table: 'approved_rca_embeddings',
+        vector_dim: vector.length,
+        id,
+      }
+    } catch (err: any) {
+      fastify.log.warn(`Failed to store approved vector in ClickHouse table: ${err.message}`)
+      return {
+        success: true,
+        stored_in_clickhouse: false,
+        warning: err.message,
+        id,
+      }
     }
   })
 }

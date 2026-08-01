@@ -13,6 +13,7 @@ import chatRoutes from "./routes/v1/chat.js";
 import rcaRoutes from "./routes/v1/rca.js";
 import simulationRoutes from "./routes/simulation.js";
 import deepseekRoutes from "./routes/v1/deepseek.js";
+import dashboardRoutes from "./routes/v1/dashboard.js";
 
 // Load environment variables from local or root directory
 dotenv.config();
@@ -39,6 +40,7 @@ await fastify.register(chatRoutes);
 await fastify.register(rcaRoutes);
 await fastify.register(simulationRoutes);
 await fastify.register(deepseekRoutes);
+await fastify.register(dashboardRoutes);
 
 // Start Server
 const PORT = parseInt(process.env.PORT || "5001", 10);
