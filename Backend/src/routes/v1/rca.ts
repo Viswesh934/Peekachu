@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify'
-import { Settings } from 'llamaindex'
 import { trace } from '@opentelemetry/api'
 import { traceRCAInvestigation, evaluateFaithfulness } from '../../services/langfuseRcaService.js'
 import { getClickHouseService } from '../../services/clickhouse.js'
 import { generateTextEmbedding } from '../../services/embeddingService.js'
+import { generateRcaDiagnosisWithLlamaIndex } from '../../services/llamaIndex.js'
 
 export default async function rcaRoutes(fastify: FastifyInstance) {
   // Analyze endpoint connecting Fastify -> Go RCA Engine -> DeepSeek Narrator -> Telemetry
@@ -58,32 +58,23 @@ export default async function rcaRoutes(fastify: FastifyInstance) {
         }
       }
 
-      // 2. Generate LLM Narration using DeepSeek via LlamaIndex Settings.llm
+      // 2. Generate LLM Narration through a LlamaIndex summary query over the evidence bundle
       let diagnosis = ''
       let promptText = ''
 
-      if (Settings.llm) {
-        promptText = `
-You are an automated Root Cause Analysis narrator for an ad-tech platform (InMobi).
-You are given a JSON evidence bundle produced by a deterministic ClickHouse analytical engine:
-
-${JSON.stringify(evidence, null, 2)}
-
-INSTRUCTIONS:
-1. Write a 3-4 sentence plain-language diagnosis explaining why the metric moved.
-2. State the metric name, time window, baseline vs current value, and percent change.
-3. State the primary revenue identity factor driver and name the top contributing segment(s) with their share of delta.
-4. Mention at least one item from the 'ruled_out' list that was checked and cleared.
-5. STRICT RULE: Every number you state MUST appear verbatim in the JSON evidence bundle. Do not compute, estimate, or round differently.
-`
+      if (evidence) {
+        promptText = [
+          'RCA evidence bundle provided to LlamaIndex summary synthesis.',
+          'Use the bundle to explain why the metric moved.',
+          'Do not add numbers that are not present in the bundle.',
+        ].join(' ')
 
         try {
-          const llmRes = await Settings.llm.complete({ prompt: promptText })
-          diagnosis = llmRes.text
-          
+          diagnosis = await generateRcaDiagnosisWithLlamaIndex(evidence)
+
           // Number-verification guard: verify every numeric figure in LLM response against ClickHouse evidence bundle
           const faithEval = evaluateFaithfulness(diagnosis, evidence)
-          if (faithEval.hallucinationDetected) {
+          if (faithEval.unsupportedNumbers.length > 0) {
             fastify.log.warn({ unsupportedNumbers: faithEval.unsupportedNumbers }, 'LLM generated unsupported numbers not in evidence bundle. Falling back to deterministic diagnosis guard.')
             diagnosis = generateFallbackDiagnosis(evidence)
           }

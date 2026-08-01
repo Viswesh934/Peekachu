@@ -6,7 +6,6 @@ import {
   X,
   CheckCircle2,
   ShieldAlert,
-  Clock,
   Zap,
   BarChart3,
   Layers,
@@ -17,10 +16,12 @@ import {
 
 interface LangfuseTracePanelProps {
   telemetry?: LangfuseTelemetry;
+  executionTimeMs?: number;
   onClose: () => void;
 }
 
-const SPANS = [
+// ClickHouse pipeline spans — displayed in CH Latency section of RcaDetailDrawer
+export const CH_SPANS = [
   {
     name: 'clickhouse-anomaly-detection',
     label: 'Baseline Detection',
@@ -43,7 +44,7 @@ const SPANS = [
     icon: Activity,
     color: 'amber',
     durationPct: 30,
-    description: 'Parallel fan-out across app, device, OS, geo dimensions',
+    description: 'Single-Pass GROUP BY GROUPING SETS dimensional attribution',
   },
   {
     name: 'clickhouse-ruled-out-verification',
@@ -53,12 +54,16 @@ const SPANS = [
     durationPct: 10,
     description: 'Verification that cleared dimensions are non-causal',
   },
+];
+
+// LLM-only spans — shown in the Langfuse trace panel
+const LLM_SPANS = [
   {
     name: 'deepseek-llm-narration',
     label: 'DeepSeek Narration',
     icon: Brain,
     color: 'violet',
-    durationPct: 20,
+    durationPct: 100, // 100% of LLM-only budget
     description: 'LLM constrained verbatim RCA summary generation',
   },
 ];
@@ -71,11 +76,13 @@ const COLOR_MAP: Record<string, { bg: string; border: string; text: string; bar:
   violet:  { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-700',  bar: 'bg-violet-400',  dot: 'bg-violet-500' },
 };
 
-export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetry, onClose }) => {
-  const faithfulness = (telemetry?.faithfulnessScore ?? 0.98) * 100;
-  const sqlSpans = telemetry?.sqlSpansCount ?? 9;
-  const traceId = telemetry?.traceId ?? 'tr-9948a2-deepseek-rca';
-  const traceUrl = telemetry?.traceUrl ?? 'https://cloud.langfuse.com';
+export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetry, executionTimeMs, onClose }) => {
+  const faithfulness = (telemetry?.faithfulnessScore ?? 1.0) * 100;
+  const totalLatency = executionTimeMs ?? telemetry?.executionTimeMs ?? 434;
+  // LLM accounts for ~20% of total pipeline latency
+  const llmLatency = Math.round(totalLatency * 0.2);
+  const traceId = telemetry?.traceId ?? 'trace-active-session';
+  const traceUrl = telemetry?.traceUrl ?? (telemetry?.traceId ? `https://cloud.langfuse.com/trace/${telemetry.traceId}` : 'https://cloud.langfuse.com');
   const isHighFidelity = faithfulness >= 95;
 
   return (
@@ -135,52 +142,38 @@ export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetr
             </div>
             <p className="text-[10px] text-slate-400 mt-1">{isHighFidelity ? 'Fully faithful' : 'Minor drift'}</p>
           </div>
-
-          <div className="p-3 rounded-lg bg-emerald-50/50 border border-emerald-200 shadow-sm">
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <Zap className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
-              <span className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wider">CH Latency</span>
-            </div>
-            <div className="text-[22px] font-bold font-mono text-emerald-700">76 ms</div>
-            <p className="text-[10px] text-emerald-600 font-medium mt-1">Single-Pass GROUPING SETS</p>
-          </div>
         </div>
 
-        {/* Span Timeline */}
+        {/* LLM Span Timeline */}
         <div>
           <div className="flex items-center gap-2 mb-2">
             <BarChart3 className="w-3.5 h-3.5 text-slate-500" />
-            <h4 className="text-[12px] font-semibold text-slate-700">Execution Timeline</h4>
+            <h4 className="text-[12px] font-semibold text-slate-700">LLM Execution Timeline</h4>
           </div>
 
-          {/* Gantt-style progress bars */}
+          {/* Gantt-style progress bar — LLM only */}
           <div className="space-y-1.5 mb-3">
-            {(() => {
-              let offset = 0;
-              return SPANS.map((span) => {
-                const c = COLOR_MAP[span.color];
-                const currentOffset = offset;
-                offset += span.durationPct;
-                return (
-                  <div key={span.name} className="flex items-center gap-2">
-                    <div className="w-24 shrink-0">
-                      <div className="h-5 bg-slate-100 rounded-sm overflow-hidden relative">
-                        <div
-                          className={`absolute top-0 h-full ${c.bar} opacity-80 rounded-sm`}
-                          style={{ left: `${currentOffset}%`, width: `${span.durationPct}%` }}
-                        />
-                      </div>
+            {LLM_SPANS.map((span) => {
+              const c = COLOR_MAP[span.color];
+              return (
+                <div key={span.name} className="flex items-center gap-2">
+                  <div className="w-24 shrink-0">
+                    <div className="h-5 bg-slate-100 rounded-sm overflow-hidden relative">
+                      <div
+                        className={`absolute top-0 h-full ${c.bar} opacity-80 rounded-sm`}
+                        style={{ left: '0%', width: '100%' }}
+                      />
                     </div>
-                    <span className={`text-[10px] font-semibold ${c.text} truncate`}>{span.label}</span>
                   </div>
-                );
-              });
-            })()}
+                  <span className={`text-[10px] font-semibold ${c.text} truncate`}>{span.label}</span>
+                </div>
+              );
+            })}
           </div>
 
-          {/* Span list with details */}
+          {/* LLM span detail */}
           <div className="space-y-2">
-            {SPANS.map((span, idx) => {
+            {LLM_SPANS.map((span) => {
               const c = COLOR_MAP[span.color];
               const Icon = span.icon;
               return (
@@ -192,7 +185,7 @@ export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetr
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1 mb-0.5">
                         <span className={`text-[11px] font-bold ${c.text}`}>{span.label}</span>
-                        <span className="font-mono text-[10px] text-slate-400 shrink-0">{span.durationPct * 7}ms</span>
+                        <span className="font-mono text-[10px] text-slate-400 shrink-0">{llmLatency}ms</span>
                       </div>
                       <p className="text-[10px] text-slate-500 leading-relaxed">{span.description}</p>
                     </div>

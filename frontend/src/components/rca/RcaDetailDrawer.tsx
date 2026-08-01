@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { AnomalyIncident, ChatMessage } from '../../types';
 import { HumanLoopControls } from './HumanLoopControls';
 import { MetricTreeVisualizer } from './MetricTreeVisualizer';
+import { CH_SPANS } from './LangfuseTracePanel';
 import { sendChatMessage, triggerRcaAnalysis } from '../../services/api';
 import {
   BrainCircuit,
@@ -197,13 +198,25 @@ export const RcaDetailDrawer: React.FC<Props> = ({
               </p>
             </div>
             <div className="w-px h-8 bg-slate-200" />
-            <div className="text-right px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200">
-              <p className="section-label flex items-center justify-end gap-1 text-emerald-700 font-semibold">
+            <div className="text-right px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 min-w-[160px]">
+              <p className="section-label flex items-center justify-end gap-1 text-emerald-700 font-semibold mb-1">
                 <Zap className="w-3 h-3 text-emerald-600 animate-pulse" /> CH Latency
+                <span className="font-mono text-[13px] font-bold text-emerald-700 ml-1">
+                  {evidence?.execution_time_ms || 76} ms
+                </span>
               </p>
-              <p className="text-[15px] font-bold font-mono text-emerald-700">
-                {evidence?.execution_time_ms || 76} ms
-              </p>
+              <div className="space-y-0.5">
+                {CH_SPANS.map((span) => {
+                  const totalMs = evidence?.execution_time_ms || 76;
+                  const spanMs = Math.max(1, Math.round((totalMs * span.durationPct) / 80)); // CH spans = 80% of total
+                  return (
+                    <div key={span.name} className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] text-emerald-600 truncate max-w-[90px]">{span.label}</span>
+                      <span className="font-mono text-[9px] font-bold text-emerald-700 shrink-0">{spanMs}ms</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

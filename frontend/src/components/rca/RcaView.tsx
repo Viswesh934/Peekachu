@@ -121,6 +121,7 @@ export const RcaView: React.FC<RcaViewProps> = ({ anomalies, onApprove, onFlagHa
           <div className="lg:col-span-3 min-h-0 overflow-y-auto">
             <LangfuseTracePanel
               telemetry={selectedAnomaly?.langfuse}
+              executionTimeMs={selectedAnomaly?.evidence?.execution_time_ms}
               onClose={() => setShowTracePanel(false)}
             />
           </div>

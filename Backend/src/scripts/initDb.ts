@@ -3,7 +3,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-dotenv.config({ path: [path.resolve(__dirname, '../../.env'), path.resolve(__dirname, '../.env'), '.env'] })
+dotenv.config({ path: [path.resolve(__dirname, '../../../.env'), path.resolve(__dirname, '../../.env'), path.resolve(__dirname, '../.env'), '.env'] })
 import { createClient } from '@clickhouse/client'
 import {
   CREATE_AD_EVENTS_TABLE_SQL,
@@ -17,9 +17,13 @@ import {
 } from '../db/schema.js'
 
 async function initDb() {
-  const url = process.env.CLICKHOUSE_URL || 'https://clickhouse.cloud'
+  const url = process.env.CLICKHOUSE_URL
   const username = process.env.CLICKHOUSE_USERNAME || 'default'
-  const password = process.env.CLICKHOUSE_PASSWORD || ''
+  const password = process.env.CLICKHOUSE_PASSWORD
+
+  if (!url || !password) {
+    throw new Error('CLICKHOUSE_URL and CLICKHOUSE_PASSWORD environment variables are required.')
+  }
 
   console.log(`Connecting to ClickHouse at ${url}...`)
   const ch = createClient({ url, username, password })

@@ -102,6 +102,22 @@ UNION ALL
 SELECT 'geo_device' AS table_name, count() AS row_count FROM geo_device;
 `;
 
+export const CREATE_AD_EVENTS_HOURLY_ROLLUP_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS ad_events_hourly_rollup
+(
+    event_hour DateTime,
+    dim_name LowCardinality(String),
+    dim_val LowCardinality(String),
+    requests AggregateFunction(count),
+    fills AggregateFunction(sum, UInt8),
+    impressions AggregateFunction(sum, UInt8),
+    clicks AggregateFunction(sum, UInt8),
+    revenue AggregateFunction(sum, Float64)
+)
+ENGINE = AggregatingMergeTree
+ORDER BY (event_hour, dim_name, dim_val);
+`;
+
 export const VERIFY_DICTIONARY_LOOKUP_SQL = `
 SELECT 
   dictGet('apps_dict', 'category', app_id) AS app_category,
@@ -115,3 +131,4 @@ FROM ad_events
 GROUP BY app_category, region, adv_vertical
 LIMIT 5;
 `;
+
