@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { MetricSummary, TimeSeriesPoint, FilterState, ModuleType } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { MetricSummary, TimeSeriesPoint, FilterState } from '../../types';
 import { MetricCard } from './MetricCard';
 import { MetricCharts } from './MetricCharts';
 import { FilterBar } from './FilterBar';
 import { LiveEventStream } from './LiveEventStream';
+import { fetchDashboardSummary, fetchDashboardTimeSeries } from '../../services/api';
 import {
   Activity,
   Percent,
@@ -11,22 +12,27 @@ import {
   TrendingUp,
   AlertTriangle,
   ArrowRight,
-  Crown,
+  BarChart2,
 } from 'lucide-react';
 
 interface DashboardViewProps {
-  metrics: MetricSummary;
-  timeSeries: TimeSeriesPoint[];
+  metrics?: MetricSummary;
+  timeSeries?: TimeSeriesPoint[];
   onNavigateToRca: () => void;
   pendingRcaCount: number;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
-  metrics,
-  timeSeries,
+  metrics: initialMetrics,
+  timeSeries: initialTimeSeries,
   onNavigateToRca,
   pendingRcaCount,
 }) => {
+  const [metrics, setMetrics] = useState<MetricSummary>(
+    initialMetrics || { revenue: 2305.72, fillRatePct: 76.2, totalRequests: 1254559, impressions: 956194, clicks: 28685, ctrPct: 3.0, ecpm: 2.82 }
+  );
+  const [timeSeries, setTimeSeries] = useState<TimeSeriesPoint[]>(initialTimeSeries || []);
+
   const [filters, setFilters] = useState<FilterState>({
     timeRange: 'last_24h',
     appCategory: 'all',
@@ -35,6 +41,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     adFormat: 'all',
     deviceModel: 'all',
   });
+
+  useEffect(() => {
+    fetchDashboardSummary().then((data) => {
+      if (data) setMetrics(data);
+    });
+    fetchDashboardTimeSeries().then((data) => {
+      if (data && data.length > 0) setTimeSeries(data);
+    });
+  }, []);
 
   const handleResetFilters = () => {
     setFilters({
@@ -48,45 +63,35 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Primary Focus Header Banner */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-brand-500/10 to-indigo-500/10 border border-emerald-500/30 glass-panel flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-            <Crown className="w-5 h-5 animate-pulse text-amber-400" />
+    <div className="space-y-5 pb-12">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-lg bg-slate-100 border border-slate-200">
+            <BarChart2 className="w-4 h-4 text-brand-600" />
           </div>
           <div>
-              <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
-              Secondary Revenue Overview
-            </h4>
-            <p className="text-xs text-slate-300">
-              Use this panel for context and monitoring after the main RCA result has been inspected.
-            </p>
+            <h2 className="text-[14px] font-bold text-slate-900 leading-tight">Event Stream Dashboard</h2>
+            <p className="text-[11px] text-slate-400 leading-tight">ClickHouse Live Query Dashboard — ad_events Fact Table</p>
           </div>
         </div>
       </div>
 
-      {/* Top Banner Alert if Pending RCA Review exists */}
+      {/* Alert banner if pending RCA review exists */}
       {pendingRcaCount > 0 && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/20 via-rose-500/10 to-brand-500/20 border border-amber-500/40 glass-panel flex flex-wrap items-center justify-between gap-4 shadow-lg shadow-amber-500/5">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30">
-              <AlertTriangle className="w-5 h-5 animate-pulse" />
-            </div>
+        <div className="card flex flex-wrap items-center justify-between gap-3 p-3.5 border-amber-300 bg-amber-50">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
             <div>
-              <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                Active Revenue Anomaly Detected (Z-Score: -3.92)
-              </h4>
-              <p className="text-xs text-slate-300">
-                Revenue drop of -28.4% at 14:00 UTC requires Human-in-the-Loop review & verification.
-              </p>
+              <p className="text-[13px] font-semibold text-slate-900 leading-tight">Revenue Spike Incident — Z-Score: +14.2</p>
+              <p className="text-[11px] text-slate-500 leading-tight">+10,558.8% Spike at 2026-06-21 · Human-in-the-Loop review required</p>
             </div>
           </div>
           <button
             onClick={onNavigateToRca}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-[12px] transition-all shrink-0 shadow-sm"
           >
-            Review Revenue RCA <ArrowRight className="w-4 h-4" />
+            Review RCA <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
@@ -94,40 +99,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Filter Bar */}
       <FilterBar filters={filters} setFilters={setFilters} onReset={handleResetFilters} />
 
-      {/* KPI Metric Cards Grid - Revenue First */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      {/* KPI Metric Cards Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
-          title="Hourly Revenue ($) [PRIMARY]"
+          title="Total Window Revenue"
           value={`$${metrics.revenue.toLocaleString()}`}
-          subtext="Baseline $25,420.50 vs $18,200.10"
-          trendPct={-28.4}
+          subtext="ClickHouse ad_events sum(revenue)"
+          trendPct={10558.8}
           icon={DollarSign}
           color="emerald"
           isAnomaly
         />
         <MetricCard
-          title="Fill Rate % (Revenue Driver)"
+          title="Fill Rate"
           value={`${metrics.fillRatePct}%`}
-          subtext="Identity factor driver for revenue"
-          trendPct={-28.1}
+          subtext="ClickHouse sum(is_filled)/count()"
+          trendPct={0.4}
           icon={Percent}
-          color="rose"
-          isAnomaly
+          color="blue"
         />
         <MetricCard
           title="Total Ad Requests"
           value={metrics.totalRequests.toLocaleString()}
-          subtext="9.48M event stream baseline"
+          subtext="ClickHouse ad_events count()"
+          trendPct={10813.4}
           icon={Activity}
-          color="indigo"
+          color="red"
+          isAnomaly
         />
         <MetricCard
-          title="Average eCPM ($)"
+          title="Average eCPM"
           value={`$${metrics.ecpm.toFixed(2)}`}
-          subtext="CPM across filled impressions"
-          trendPct={0.0}
+          subtext="CPM across impressions"
+          trendPct={0.3}
           icon={TrendingUp}
-          color="purple"
+          color="amber"
         />
       </div>
 

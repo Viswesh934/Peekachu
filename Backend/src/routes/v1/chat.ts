@@ -35,14 +35,38 @@ export default async function chatRoutes(fastify: FastifyInstance) {
     const requestedMetric = detectMetricFromText(queryText) || DEFAULT_METRIC;
 
     try {
-      const index = getIndex();
-
-      // Check if user request requires ClickHouse ad-hoc SQL query execution
       const chService = getClickHouseService();
       let dbContext = "";
+      let approvedFindingsContext = "";
 
+      // Query approved RCA findings stored in ClickHouse
+      try {
+        const approvedRows = await chService.query<any>(
+          "SELECT id, metric, title, diagnosis, window_start, window_end, baseline_value, current_value, pct_change, z_score, reviewed_by, reviewed_at FROM approved_rca_findings ORDER BY reviewed_at DESC LIMIT 5"
+        );
+        if (approvedRows && approvedRows.length > 0) {
+          approvedFindingsContext = `\n\nApproved RCA Findings in ClickHouse (Human Verified):\n` +
+            approvedRows.map((r: any) => 
+              `- [ID: ${r.id}] Metric: ${r.metric}, Title: "${r.title}", Window: ${r.window_start} to ${r.window_end}, Baseline: ${r.baseline_value}, Current: ${r.current_value}, Change: ${r.pct_change}%, Z-Score: ${r.z_score}. Verified by ${r.reviewed_by} at ${r.reviewed_at}. Diagnosis: ${r.diagnosis}`
+            ).join("\n");
+        }
+      } catch (apErr) {
+        // Table may not exist yet or no findings stored
+      }
+
+      // Check if query is asking for anomaly verification or ClickHouse database context
       const queryLower = queryText.toLowerCase();
+      const isVerificationQuery =
+        queryLower.includes("verify") ||
+        queryLower.includes("validate") ||
+        queryLower.includes("confirm") ||
+        queryLower.includes("spike") ||
+        queryLower.includes("anomaly") ||
+        queryLower.includes("root cause") ||
+        queryLower.includes("rca");
+
       if (
+        isVerificationQuery ||
         queryLower.includes("table") ||
         queryLower.includes("ad_events") ||
         queryLower.includes("count") ||
@@ -56,12 +80,9 @@ export default async function chatRoutes(fastify: FastifyInstance) {
         queryLower.includes("mcp")
       ) {
         try {
-          // Fetch available tools from ClickHouse MCP server over stdio
           const mcpClient = getClickHouseMCPLLMClient();
           const mcpTools = await mcpClient.listTools();
           const toolNames = mcpTools.map((t: any) => t.name).join(", ");
-
-          // Fetch table schema information using ClickHouseService
           const tables = await chService.listTables("default");
           const tableNames = tables.map((t) => t.name).join(", ");
 
@@ -71,12 +92,90 @@ export default async function chatRoutes(fastify: FastifyInstance) {
         }
       }
 
+      const index = getIndex();
+
       if (!index && Settings.llm) {
         console.log(`DeepSeek LLM chat turn with ClickHouse context: "${queryText}"`);
 
-        const prompt = dbContext
-          ? `System Context: You have access to ClickHouse Cloud database. ${dbContext}\nPrimary metric: revenue. Default metric when unspecified: ${requestedMetric}.\n\nUser Question: ${queryText}`
-          : `Primary metric: revenue. Default metric when unspecified: ${requestedMetric}.\n\n${queryText}`;
+        const now = new Date();
+        const formatClickHouseDateTime = (date: Date) =>
+          date.toISOString().slice(0, 19).replace("T", " ");
+
+        const windowEnd = formatClickHouseDateTime(now);
+
+        const windowStartDate = new Date(now);
+        windowStartDate.setHours(windowStartDate.getHours() - 24);
+        const windowStart = formatClickHouseDateTime(windowStartDate);
+
+        const baselineStartDate = new Date(windowStartDate);
+        baselineStartDate.setHours(baselineStartDate.getHours() - 24);
+        const baselineStart = formatClickHouseDateTime(baselineStartDate);
+        const baselineEnd = windowStart;
+
+        const verificationInstruction = isVerificationQuery
+          ? `
+SPECIAL INSTRUCTION:
+
+The user is asking to verify a revenue metric anomaly using the latest available data.
+
+Current analysis time: ${windowEnd} UTC
+
+Current anomaly window:
+[${windowStart}, ${windowEnd})
+
+Baseline comparison window:
+[${baselineStart}, ${baselineEnd})
+
+Use ClickHouse to verify the anomaly from the underlying data.
+
+1. Compare baseline vs current window using:
+   - sum(revenue) AS revenue
+   - count() AS requests
+   - sum(is_filled) / count() AS fill_rate
+   - avg(ecpm) AS ecpm
+
+2. Break down the revenue change by relevant dimensions including:
+   - campaign_type
+   - publisher_tier
+   - ad_format
+   - region
+
+3. Calculate contribution/delta shares from the actual ClickHouse results.
+Do NOT assume previously observed percentages such as CPM 46.2%, tier_2 46.1%,
+banner 34.8%, NAM 29.9%, or APAC 28.4%.
+
+4. Determine whether the anomaly is primarily caused by:
+   - traffic/request volume
+   - fill rate
+   - eCPM
+   - segment mix
+   - or another measurable factor.
+
+5. Do NOT assume eCPM was ruled out.
+Calculate its actual percentage change from ClickHouse.
+
+Use half-open time ranges:
+event_time >= start AND event_time < end.
+
+Show the ClickHouse SQL used and base conclusions only on query results.
+`
+          : "";
+
+        const prompt = `System Context: You are an AdTech RCA assistant connected to ClickHouse Cloud. ${dbContext}${approvedFindingsContext}
+
+${verificationInstruction}
+
+TIME RULES:
+- Treat ClickHouse event_time as UTC.
+- Use ClickHouse now() as the authoritative current time.
+- Use half-open intervals: >= start AND < end.
+- Never assume a historical anomaly window unless the user explicitly specifies one.
+- When the user says "today", derive today from ClickHouse time.
+- When the user says "current", "latest", or "now", query the latest available data.
+
+Primary metric: revenue. Default metric: ${requestedMetric}.
+
+User Question: ${queryText}`;
 
         const llmResponse = await Settings.llm.complete({ prompt });
         const contentText = llmResponse.text;

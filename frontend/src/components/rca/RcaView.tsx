@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 import { AnomalyIncident } from '../../types';
-import { AnomalyCard } from './AnomalyCard';
 import { RcaDetailDrawer } from './RcaDetailDrawer';
-import { LangfuseTraceModal } from './LangfuseTraceModal';
-import { RcaChatDrawer } from './RcaChatDrawer';
-import { BrainCircuit, Sparkles, Filter, Play, CheckCircle2, RefreshCw } from 'lucide-react';
+import { LangfuseTracePanel } from './LangfuseTracePanel';
+import { BrainCircuit, RefreshCw, Play } from 'lucide-react';
 
 interface RcaViewProps {
   anomalies: AnomalyIncident[];
@@ -13,173 +11,121 @@ interface RcaViewProps {
 }
 
 export const RcaView: React.FC<RcaViewProps> = ({ anomalies, onApprove, onFlagHallucination }) => {
-  const [selectedId, setSelectedId] = useState<string>(anomalies[0]?.id || '');
-  const [showTraceModal, setShowTraceModal] = useState(false);
-  const [showChatDrawer, setShowChatDrawer] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<string>('ALL');
+  const [showTracePanel, setShowTracePanel] = useState(false);
   const [isDemoReplaying, setIsDemoReplaying] = useState(false);
   const [demoStep, setDemoStep] = useState<number | null>(null);
 
-  const selectedAnomaly = anomalies.find((a) => a.id === selectedId) || anomalies[0];
-
-  const filteredAnomalies = anomalies.filter((a) => {
-    if (filterStatus === 'ALL') return true;
-    return a.humanReview.status === filterStatus;
-  });
+  const selectedAnomaly = anomalies[0];
 
   const handleReplayDemo = () => {
-    if (anomalies.length === 0) return;
-    const demoIncident = anomalies[0]; // INC-2026-0801-01 (Fill Rate Drop on iPhone 15 Pro)
-    setSelectedId(demoIncident.id);
     setIsDemoReplaying(true);
     setDemoStep(1);
-
     setTimeout(() => setDemoStep(2), 1200);
     setTimeout(() => setDemoStep(3), 2400);
     setTimeout(() => {
       setDemoStep(4);
-      setTimeout(() => {
-        setIsDemoReplaying(false);
-        setDemoStep(null);
-      }, 2000);
+      setTimeout(() => { setIsDemoReplaying(false); setDemoStep(null); }, 2000);
     }, 3600);
   };
 
+  const DEMO_STEPS = [
+    { label: 'Anomaly Triggered', sub: '|Z| ≥ 3.0', color: 'amber' },
+    { label: 'ClickHouse Fan-out', sub: 'SQL Parallel Queries', color: 'blue' },
+    { label: 'Metric Tree Eval', sub: 'Contribution Scoring', color: 'red' },
+    { label: 'DeepSeek Narration', sub: 'Verbatim RCA', color: 'green' },
+  ];
+
   return (
-    <div className="space-y-6 pb-12">
-      {/* Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 p-5 rounded-2xl bg-slate-900/90 border border-slate-800 glass-panel shadow-2xl">
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 glow-amber">
-            <BrainCircuit className="w-6 h-6 animate-pulse" />
+    <div className="h-full flex flex-col gap-4">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-lg bg-brand-50 border border-brand-200">
+            <BrainCircuit className="w-4 h-4 text-brand-600" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              Automated Root Cause Analyst (InMobi Click-a-thon)
-              <span className="text-xs font-mono font-normal px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
-                ClickHouse + Go + DeepSeek
-              </span>
-            </h2>
-            <p className="text-xs text-slate-400">
-              Automated metric anomaly detection, revenue identity tree decomposition & zero-hallucination verbatim diagnosis
-            </p>
+            <h2 className="text-[14px] font-bold text-slate-900 leading-tight">Root Cause Analysis Workbench</h2>
+            <p className="text-[11px] text-slate-400 leading-tight">ClickHouse · Go Worker Pool · DeepSeek LLM</p>
           </div>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-3">
-          {/* Problem Statement Demo Replay Button */}
+        <div className="flex items-center gap-2">
+          {/* Demo walkthrough */}
           <button
             onClick={handleReplayDemo}
             disabled={isDemoReplaying}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white font-extrabold text-xs shadow-lg shadow-rose-500/20 transition-all transform hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 border border-slate-200 text-[12px] font-medium transition-all disabled:opacity-50 shadow-sm"
           >
-            {isDemoReplaying ? (
-              <RefreshCw className="w-4 h-4 animate-spin text-white" />
-            ) : (
-              <Play className="w-4 h-4 fill-current text-white" />
-            )}
-            <span>▶ Replay Incident Demo (Problem Statement Walkthrough)</span>
+            {isDemoReplaying
+              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              : <Play className="w-3.5 h-3.5" />
+            }
+            Demo Walkthrough
           </button>
-
-          {/* Status Filter Pills */}
-          <div className="flex items-center gap-1.5 text-xs bg-slate-950/60 p-1 rounded-xl border border-slate-800">
-            <Filter className="w-3.5 h-3.5 text-slate-400 ml-1" />
-            {['ALL', 'PENDING', 'APPROVED', 'HALLUCINATION'].map((st) => (
-              <button
-                key={st}
-                onClick={() => setFilterStatus(st)}
-                className={`px-2.5 py-1 rounded-lg font-semibold transition-all text-[11px] ${
-                  filterStatus === st
-                    ? 'bg-brand-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {st}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
-      {/* Demo Walkthrough Progress Banner */}
+      {/* Demo walkthrough progress */}
       {isDemoReplaying && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-950/80 via-slate-900 to-rose-950/80 border border-amber-500/50 glass-panel shadow-2xl space-y-2 animate-fade-in">
-          <div className="flex items-center justify-between text-xs font-bold text-amber-300">
-            <span className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
-              <span>Executing Problem Statement Demo Sequence...</span>
-            </span>
-            <span className="font-mono text-[11px]">Step {demoStep} of 4</span>
+        <div className="card px-4 py-3 animate-fade-in shrink-0">
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-[12px] font-semibold text-slate-700">Demo Sequence Running</span>
+            <span className="mono-pill">Step {demoStep} / 4</span>
           </div>
-
-          <div className="grid grid-cols-4 gap-2 text-[11px]">
-            <div className={`p-2 rounded-lg border font-mono ${demoStep! >= 1 ? 'bg-amber-500/20 text-amber-200 border-amber-500/40' : 'bg-slate-950/40 text-slate-500 border-slate-800'}`}>
-              1. Alert Triggered (|Z| ≥ 3.0)
-            </div>
-            <div className={`p-2 rounded-lg border font-mono ${demoStep! >= 2 ? 'bg-cyan-500/20 text-cyan-200 border-cyan-500/40' : 'bg-slate-950/40 text-slate-500 border-slate-800'}`}>
-              2. ClickHouse SQL Fan-out
-            </div>
-            <div className={`p-2 rounded-lg border font-mono ${demoStep! >= 3 ? 'bg-rose-500/20 text-rose-200 border-rose-500/40' : 'bg-slate-950/40 text-slate-500 border-slate-800'}`}>
-              3. Metric Tree Evaluation
-            </div>
-            <div className={`p-2 rounded-lg border font-mono ${demoStep! >= 4 ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40' : 'bg-slate-950/40 text-slate-500 border-slate-800'}`}>
-              4. DeepSeek Verbatim RCA
-            </div>
+          <div className="grid grid-cols-4 gap-2">
+            {DEMO_STEPS.map((step, i) => {
+              const active = demoStep !== null && demoStep > i;
+              return (
+                <div
+                  key={i}
+                  className={`px-3 py-2 rounded-lg border text-[11px] transition-all duration-300 ${
+                    active
+                      ? step.color === 'amber' ? 'bg-amber-50 border-amber-200 text-amber-700'
+                        : step.color === 'blue'  ? 'bg-blue-50 border-blue-200 text-blue-700'
+                        : step.color === 'red'   ? 'bg-red-50 border-red-200 text-red-700'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      : 'bg-slate-50 border-slate-200 text-slate-400'
+                  }`}
+                >
+                  <div className="font-semibold">{step.label}</div>
+                  <div className="text-[10px] opacity-70 mt-0.5">{step.sub}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* Grid Layout: Left Anomaly List, Right RCA Detail Drawer */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Anomaly List (4 cols) */}
-        <div className="lg:col-span-4 space-y-4">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
-            Detected Anomalies ({filteredAnomalies.length})
-          </h3>
-
-          <div className="space-y-3 max-h-[750px] overflow-y-auto pr-1">
-            {filteredAnomalies.map((ano) => (
-              <AnomalyCard
-                key={ano.id}
-                anomaly={ano}
-                isSelected={ano.id === selectedAnomaly?.id}
-                onSelect={() => setSelectedId(ano.id)}
-              />
-            ))}
-
-            {filteredAnomalies.length === 0 && (
-              <div className="p-8 text-center rounded-2xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400">
-                No incidents match status filter "{filterStatus}".
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right Column: RCA Detail & Human Loop Actions (8 cols) */}
-        <div className="lg:col-span-8">
+      {/* Main Workbench Layout */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0">
+        {/* RCA Analysis Workbench (GET & SET) */}
+        <div className={`${showTracePanel ? 'lg:col-span-9' : 'lg:col-span-12'} min-h-0 overflow-y-auto`}>
           {selectedAnomaly ? (
             <RcaDetailDrawer
               anomaly={selectedAnomaly}
               onApprove={onApprove}
               onFlagHallucination={onFlagHallucination}
-              onOpenLangfuseTrace={() => setShowTraceModal(true)}
-              onOpenChatAgent={() => setShowChatDrawer(true)}
+              onOpenLangfuseTrace={() => setShowTracePanel((v) => !v)}
+              onOpenChatAgent={() => {}}
+              isTraceOpen={showTracePanel}
             />
           ) : (
-            <div className="p-12 text-center rounded-2xl bg-slate-900 border border-slate-800 text-slate-400">
-              Select an anomaly from the left panel to inspect findings.
+            <div className="card p-16 text-center text-[13px] text-slate-400">
+              Select metric and window above, then click "Get Analysis".
             </div>
           )}
         </div>
+
+        {/* Langfuse Trace Panel — inline side panel when open */}
+        {showTracePanel && (
+          <div className="lg:col-span-3 min-h-0 overflow-y-auto">
+            <LangfuseTracePanel
+              telemetry={selectedAnomaly?.langfuse}
+              onClose={() => setShowTracePanel(false)}
+            />
+          </div>
+        )}
       </div>
-
-      {/* Modals & Drawers */}
-      {showTraceModal && (
-        <LangfuseTraceModal telemetry={selectedAnomaly?.langfuse} onClose={() => setShowTraceModal(false)} />
-      )}
-
-      {showChatDrawer && <RcaChatDrawer onClose={() => setShowChatDrawer(false)} />}
     </div>
   );
 };
