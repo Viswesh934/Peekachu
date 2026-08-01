@@ -27,9 +27,9 @@ export class ClickHouseService {
   private client: ClickHouseClient;
 
   constructor(options?: { url?: string; username?: string; password?: string; database?: string }) {
-    const url = options?.url || process.env.CLICKHOUSE_URL || "http://localhost:8123";
+    const url = options?.url || process.env.CLICKHOUSE_URL || "https://v8k6il94hg.ap-south-1.aws.clickhouse.cloud:8443";
     const username = options?.username || process.env.CLICKHOUSE_USERNAME || process.env.CLICKHOUSE_USER || "default";
-    const password = options?.password || process.env.CLICKHOUSE_PASSWORD || "";
+    const password = options?.password || process.env.CLICKHOUSE_PASSWORD || "i2D_29fLWj8i3";
     const database = options?.database || process.env.CLICKHOUSE_DATABASE || "default";
 
     this.client = createClient({
@@ -139,7 +139,7 @@ export class ClickHouseService {
    */
   public async describeTable(database: string, table: string): Promise<ClickHouseColumnInfo[]> {
     return this.query<ClickHouseColumnInfo>(
-      `SELECT name, type, default_type, default_expression, comment 
+      `SELECT name, type, default_kind AS default_type, default_expression, comment 
        FROM system.columns 
        WHERE database = {db: String} AND table = {tbl: String} 
        ORDER BY position`,
