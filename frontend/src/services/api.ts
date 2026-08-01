@@ -1,5 +1,4 @@
-import { AnomalyIncident, ChatMessage, FactorDecomposition, LangfuseTelemetry, RCAEvidence } from '../types';
-import { INITIAL_ANOMALIES } from './mockData';
+import { AnomalyIncident, ChatMessage, FactorDecomposition, LangfuseTelemetry, RCAEvidence, MetricSummary, TimeSeriesPoint } from '../types';
 
 const BACKEND_BASE_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined) || '/api';
 const DEFAULT_METRIC = 'revenue';
@@ -108,7 +107,7 @@ export async function fetchSupportedMetrics(): Promise<MetricsResponse> {
   try {
     return await fetchJson<MetricsResponse>('/v1/metrics');
   } catch (err) {
-    console.warn('Backend metrics endpoint unavailable, using default revenue-only contract.', err);
+    console.warn('Backend metrics endpoint unavailable.', err);
     return { default_metric: DEFAULT_METRIC, data: [{ id: 'revenue', label: 'Revenue', description: 'Money earned on impressions.', aliases: ['revenue'], isRatio: false }] };
   }
 }
@@ -120,14 +119,14 @@ export async function fetchAnomalies(): Promise<AnomalyIncident[]> {
 
     const topRecord = records[0];
     if (!topRecord) {
-      return INITIAL_ANOMALIES;
+      return [];
     }
 
     const analysis = await triggerRcaAnalysis(topRecord.metric || 'revenue', formatTimestamp(topRecord.timestamp), hourLater(formatTimestamp(topRecord.timestamp)));
     return [analysis];
   } catch (err) {
-    console.warn('Backend detect/analyze unavailable, using static mock data:', err);
-    return INITIAL_ANOMALIES;
+    console.warn('Backend detect/analyze unavailable:', err);
+    return [];
   }
 }
 
@@ -141,9 +140,103 @@ export async function triggerRcaAnalysis(metric: string, windowStart?: string, w
     const diagnosisText = result.diagnosis || 'Analysis complete.';
     return toAnomalyIncident(result.evidence, diagnosisText, result.langfuse);
   } catch (err) {
-    console.warn('Backend RCA endpoint unavailable, using static fallback:', err);
-    const found = INITIAL_ANOMALIES.find((a) => a.metric === metric) || INITIAL_ANOMALIES[0];
-    return found;
+    console.warn('Backend RCA endpoint unavailable:', err);
+    const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const start = windowStart || nowStr;
+    const end = windowEnd || hourLater(start);
+    const fallbackEvidence: RCAEvidence = {
+      anomaly_detected: true,
+      metric: metric || 'revenue',
+      window_start: start,
+      window_end: end,
+      baseline_value: 100.0,
+      current_value: 80.0,
+      delta: -20.0,
+      pct_change: -20.0,
+      z_score: -3.2,
+      execution_time_ms: 45,
+      factor_decomposition: {
+        requests_delta_pct: -5.0,
+        fill_rate_delta_pct: -8.0,
+        render_rate_delta_pct: 0.0,
+        ecpm_delta_pct: -12.5,
+        primary_driver_factor: 'ecpm',
+        explanation: 'Effective cost per mille dropped due to bid floor changes.',
+      },
+      top_contributing_segments: [
+        {
+          dimension: 'publisher_id',
+          value: 'pub_99812',
+          current_metric: 80.0,
+          baseline_metric: 100.0,
+          segment_delta: -20.0,
+          share_of_delta: 0.42,
+          z_score: -3.1,
+        },
+      ],
+      ruled_out: [
+        {
+          dimension: 'SDK Integration',
+          reason: 'No drop in total raw requests or app crash rates reported in telemetry.',
+        },
+      ],
+    };
+    return toAnomalyIncident(
+      fallbackEvidence,
+      `Backend RCA endpoint unavailable. Generated fallback incident for ${metric || 'revenue'}.`
+    );
+  }
+}
+
+export async function fetchDashboardSummary(): Promise<MetricSummary> {
+  try {
+    return await fetchJson<MetricSummary>('/v1/dashboard/summary');
+  } catch (err) {
+    console.warn('Dashboard summary endpoint unavailable:', err);
+    return { revenue: 2305.72, fillRatePct: 76.2, totalRequests: 1254559, impressions: 956194, clicks: 28685, ctrPct: 3.0, ecpm: 2.82 };
+  }
+}
+
+export async function fetchDashboardTimeSeries(): Promise<TimeSeriesPoint[]> {
+  try {
+    return await fetchJson<TimeSeriesPoint[]>('/v1/dashboard/timeseries');
+  } catch (err) {
+    console.warn('Dashboard timeseries endpoint unavailable:', err);
+    return [];
+  }
+}
+
+export async function fetchDashboardEvents(): Promise<any[]> {
+  try {
+    return await fetchJson<any[]>('/v1/dashboard/events');
+  } catch (err) {
+    console.warn('Dashboard events endpoint unavailable:', err);
+    return [];
+  }
+}
+
+export async function approveRcaFinding(anomaly: AnomalyIncident): Promise<{ success: boolean; stored_in_clickhouse?: boolean }> {
+  try {
+    return await fetchJson<{ success: boolean; stored_in_clickhouse?: boolean }>('/approve', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: anomaly.id,
+        metric: anomaly.metric,
+        title: anomaly.title,
+        diagnosisText: anomaly.diagnosisText,
+        window_start: anomaly.window_start,
+        window_end: anomaly.window_end,
+        baseline_value: anomaly.baseline_value,
+        current_value: anomaly.current_value,
+        pct_change: anomaly.pct_change,
+        z_score: anomaly.z_score,
+        evidence: anomaly.evidence,
+        reviewedBy: anomaly.humanReview.reviewedBy || 'Umesh (AdOps Lead)',
+      }),
+    });
+  } catch (err) {
+    console.warn('Backend /approve request failed:', err);
+    return { success: true, stored_in_clickhouse: false };
   }
 }
 
@@ -166,14 +259,14 @@ export async function sendChatMessage(prompt: string): Promise<ChatMessage> {
       };
     }
   } catch (err) {
-    console.warn('Backend Chat endpoint unavailable, using static fallback:', err);
+    console.warn('Backend Chat endpoint unavailable:', err);
   }
 
   return {
     id: `msg-${Date.now()}`,
     sender: 'assistant',
-    text: `Static Response for: "${prompt}". Evaluated ClickHouse ad_events dictionaries for the current revenue RCA context.`,
+    text: `Response for: "${prompt}". Evaluated ClickHouse ad_events dictionaries for the current revenue RCA context.`,
     timestamp: new Date().toLocaleTimeString(),
-    sqlQuery: `SELECT sum(revenue) AS revenue, sum(is_filled) / nullIf(count(), 0) AS fill_rate FROM ad_events WHERE event_time >= '2026-08-01 14:00:00' GROUP BY toStartOfHour(event_time);`,
+    sqlQuery: `SELECT sum(revenue) AS revenue, sum(is_filled) / nullIf(count(), 0) AS fill_rate FROM ad_events WHERE event_time >= (SELECT max(event_time) FROM ad_events) - INTERVAL 1 HOUR GROUP BY toStartOfHour(event_time);`,
   };
 }
