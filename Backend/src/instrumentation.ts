@@ -6,7 +6,11 @@ import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http'
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics'
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs'
 import { resourceFromAttributes } from '@opentelemetry/resources'
-import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions'
+import {
+  ATTR_SERVICE_NAME,
+  ATTR_SERVICE_VERSION,
+  ATTR_SERVICE_NAMESPACE,
+} from '@opentelemetry/semantic-conventions'
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -21,7 +25,11 @@ const endpoint = rawEndpoint.replace(/\/+$/, '')
 
 const sdk = new NodeSDK({
   resource: resourceFromAttributes({
-    [ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || 'clicker',
+    [ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || 'peekachu-rca-backend',
+    [ATTR_SERVICE_NAMESPACE]: 'inmobi.rca',
+    [ATTR_SERVICE_VERSION]: '1.0.0',
+    'deployment.environment': process.env.NODE_ENV || 'production',
+    'inmobi.system': 'peekachu-automated-rca',
   }),
 
   traceExporter: new OTLPTraceExporter({
@@ -40,12 +48,16 @@ const sdk = new NodeSDK({
     }),
   }),
 
-  instrumentations: [getNodeAutoInstrumentations()],
+  instrumentations: [
+    getNodeAutoInstrumentations({
+      '@opentelemetry/instrumentation-fs': { enabled: false }, // avoid verbose file system noise
+    }),
+  ],
 })
 
 sdk.start()
 
-console.log(`✅ OpenTelemetry SDK initialized successfully -> exporting OTLP to: ${endpoint}`)
+console.log(`✅ Peekachu OpenTelemetry SDK initialized (Service: peekachu-rca-backend) -> exporting OTLP to: ${endpoint}`)
 
 // Ensure telemetry buffers flush on shutdown
 process.on('SIGTERM', () => {
