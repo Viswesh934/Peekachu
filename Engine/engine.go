@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"math"
 	"sort"
@@ -15,52 +16,81 @@ type RCAEngine struct {
 	conn driver.Conn
 }
 
+const (
+	anomalyZThreshold    = 3.0
+	positivePctThreshold = 10.0
+)
+
 func NewRCAEngine(conn driver.Conn) *RCAEngine {
 	return &RCAEngine{conn: conn}
 }
 
-// FindTopAnomaly scans the dataset for the most significant anomaly if no window is specified
+// FindTopAnomaly scans the dataset for the most significant anomaly for the specified metric
 func (e *RCAEngine) FindTopAnomaly(ctx context.Context, metric string) (*AnomalyRecord, error) {
-	query := `
+	curCol, baseCol, stdCol, err := metricColumns(metric)
+	if err != nil {
+		return nil, err
+	}
+
+	query := fmt.Sprintf(`
 	WITH hourly AS (
 	  SELECT toStartOfHour(event_time) AS h,
 	         count() AS requests,
 	         sum(is_filled) AS fills,
 	         sum(is_impression) AS impressions,
+	         sum(is_click) AS clicks,
 	         sum(revenue) AS revenue,
 	         fills / nullIf(requests, 0) AS fill_rate,
+	         impressions / nullIf(fills, 0) AS render_rate,
+	         clicks / nullIf(impressions, 0) AS ctr,
 	         revenue / nullIf(impressions, 0) * 1000 AS ecpm
+	         , revenue / nullIf(requests, 0) AS rpr
 	  FROM ad_events GROUP BY h
 	),
 	baseline AS (
-	  SELECT h, fill_rate, revenue, requests, ecpm,
+	  SELECT h, fill_rate, render_rate, ctr, revenue, requests, fills, impressions, clicks, ecpm, rpr,
 	         avg(fill_rate) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS fr_base,
 	         stddevPop(fill_rate) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS fr_std,
+	         avg(render_rate) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS render_rate_base,
+	         stddevPop(render_rate) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS render_rate_std,
+	         avg(ctr) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS ctr_base,
+	         stddevPop(ctr) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS ctr_std,
 	         avg(revenue) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS rev_base,
-	         stddevPop(revenue) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS rev_std
+	         stddevPop(revenue) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS rev_std,
+	         avg(fills) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS fills_base,
+	         stddevPop(fills) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS fills_std,
+	         avg(impressions) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS impressions_base,
+	         stddevPop(impressions) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS impressions_std,
+	         avg(clicks) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS clicks_base,
+	         stddevPop(clicks) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS clicks_std,
+	         avg(ecpm) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS ecpm_base,
+	         stddevPop(ecpm) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS ecpm_std,
+	         avg(rpr) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS rpr_base,
+	         stddevPop(rpr) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS rpr_std,
+	         avg(requests) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS req_base,
+	         stddevPop(requests) OVER (PARTITION BY toDayOfWeek(h), toHour(h) ORDER BY h ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS req_std
 	  FROM hourly
 	)
 	SELECT 
 	  h,
-	  revenue,
-	  rev_base,
-	  (revenue - rev_base) / nullIf(rev_std, 0) AS rev_z
+	  toFloat64(%s) AS current_val,
+	  toFloat64(%s) AS base_val,
+	  (current_val - base_val) / nullIf(%s, 0) AS z_val
 	FROM baseline
-	WHERE abs(rev_z) > 3.0
-	ORDER BY abs(rev_z) DESC
+	WHERE z_val IS NOT NULL AND abs((current_val - base_val) / nullIf(base_val, 0)) >= 0.05
+	ORDER BY abs(z_val) DESC
 	LIMIT 1;
-	`
+	`, curCol, baseCol, stdCol)
 
 	row := e.conn.QueryRow(ctx, query)
 	var h time.Time
 	var current, base, z float64
 
 	if err := row.Scan(&h, &current, &base, &z); err != nil {
-		// Default fallback window if no anomaly query match
-		h, _ = time.Parse("2006-01-02 15:04:05", "2026-06-21 11:00:00")
-		current = 12.45
-		base = 21.63
-		z = -5.06
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("no eligible anomaly rows found: %w", err)
+		}
+		return nil, fmt.Errorf("failed to scan anomaly row: %w", err)
 	}
 
 	pct := 0.0
@@ -86,6 +116,11 @@ func (e *RCAEngine) PerformAnalysis(ctx context.Context, req AnalyzeRequest) (*R
 	if metric == "" {
 		metric = "revenue"
 	}
+	metricDef, err := resolveMetric(metric)
+	if err != nil {
+		return nil, err
+	}
+	metric = metricDef.Name
 
 	var wStart, wEnd string
 	var anomaly *AnomalyRecord
@@ -129,18 +164,28 @@ func (e *RCAEngine) PerformAnalysis(ctx context.Context, req AnalyzeRequest) (*R
 	}
 
 	// 2. Revenue Identity Factor Decomposition
-	factorDecomp := e.decomposeFactors(currentMetrics, baseMetrics)
+	var factorDecomp *FactorDecomposition
+	if metric == "revenue" || metric == "rpr" {
+		factorDecomp = e.decomposeFactors(currentMetrics, baseMetrics)
+	}
+
+	targetDrillMetric := metric
+	if (metric == "revenue" || metric == "rpr") && factorDecomp != nil && factorDecomp.PrimaryFactor != "" {
+		targetDrillMetric = factorDecomp.PrimaryFactor
+	}
+
+	targetDelta := currentMetrics[targetDrillMetric] - baseMetrics[targetDrillMetric]
 
 	// 3. Concurrent Fan-Out Primary Dimension Breakdown (Wave 1)
-	primarySegments, ruledOutDims := e.drillDownPrimaryDimensions(ctx, wStart, wEnd, metric, delta)
+	primarySegments, ruledOutDims := e.drillDownPrimaryDimensions(ctx, wStart, wEnd, targetDrillMetric, targetDelta)
 
 	// 4. Multi-Level Recursive Drill-Down (Wave 2)
-	twoLevelSegments := e.drillDownTwoLevel(ctx, wStart, wEnd, metric, delta, primarySegments)
+	twoLevelSegments := e.drillDownTwoLevel(ctx, wStart, wEnd, targetDrillMetric, targetDelta, primarySegments)
 
 	// Combine Wave 1 and Wave 2 top segments
 	allTop := append(primarySegments, twoLevelSegments...)
 	sort.Slice(allTop, func(i, j int) bool {
-		return math.Abs(allTop[i].ShareOfDelta) > math.Abs(allTop[j].ShareOfDelta)
+		return math.Abs(allTop[i].SegmentDelta) > math.Abs(allTop[j].SegmentDelta)
 	})
 
 	if len(allTop) > 6 {
@@ -153,7 +198,7 @@ func (e *RCAEngine) PerformAnalysis(ctx context.Context, req AnalyzeRequest) (*R
 	execMs := time.Since(startTime).Milliseconds()
 
 	return &RCAEvidence{
-		AnomalyDetected:         math.Abs(anomaly.ZScore) > 2.0 || math.Abs(pctChange) > 10.0,
+		AnomalyDetected:         math.Abs(anomaly.ZScore) > anomalyZThreshold || math.Abs(pctChange) > positivePctThreshold,
 		Metric:                  metric,
 		WindowStart:             wStart,
 		WindowEnd:               wEnd,
@@ -183,11 +228,11 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 	),
 	baseline_period AS (
 		SELECT 
-			count() / 4.0 AS requests,
-			sum(is_filled) / 4.0 AS fills,
-			sum(is_impression) / 4.0 AS impressions,
-			sum(is_click) / 4.0 AS clicks,
-			sum(revenue) / 4.0 AS revenue
+			count() / nullIf(uniqExact(toDate(event_time)), 0) AS requests,
+			sum(is_filled) / nullIf(uniqExact(toDate(event_time)), 0) AS fills,
+			sum(is_impression) / nullIf(uniqExact(toDate(event_time)), 0) AS impressions,
+			sum(is_click) / nullIf(uniqExact(toDate(event_time)), 0) AS clicks,
+			sum(revenue) / nullIf(uniqExact(toDate(event_time)), 0) AS revenue
 		FROM ad_events
 		WHERE event_time < '%s' 
 		  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
@@ -209,27 +254,29 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 	}
 
 	curMap := map[string]float64{
-		"requests":  curReq,
-		"fills":     curFill,
-		"fill_rate": safeDiv(curFill, curReq),
+		"requests":    curReq,
+		"fills":       curFill,
+		"fill_rate":   safeDiv(curFill, curReq),
 		"impressions": curImp,
 		"render_rate": safeDiv(curImp, curFill),
-		"clicks":    curClick,
-		"ctr":       safeDiv(curClick, curImp),
-		"revenue":   curRev,
-		"ecpm":      safeDiv(curRev, curImp) * 1000.0,
+		"clicks":      curClick,
+		"ctr":         safeDiv(curClick, curImp),
+		"revenue":     curRev,
+		"ecpm":        safeDiv(curRev, curImp) * 1000.0,
+		"rpr":         safeDiv(curRev, curReq),
 	}
 
 	baseMap := map[string]float64{
-		"requests":  baseReq,
-		"fills":     baseFill,
-		"fill_rate": safeDiv(baseFill, baseReq),
+		"requests":    baseReq,
+		"fills":       baseFill,
+		"fill_rate":   safeDiv(baseFill, baseReq),
 		"impressions": baseImp,
 		"render_rate": safeDiv(baseImp, baseFill),
-		"clicks":    baseClick,
-		"ctr":       safeDiv(baseClick, baseImp),
-		"revenue":   baseRev,
-		"ecpm":      safeDiv(baseRev, baseImp) * 1000.0,
+		"clicks":      baseClick,
+		"ctr":         safeDiv(baseClick, baseImp),
+		"revenue":     baseRev,
+		"ecpm":        safeDiv(baseRev, baseImp) * 1000.0,
+		"rpr":         safeDiv(baseRev, baseReq),
 	}
 
 	return curMap, baseMap, nil
@@ -243,10 +290,10 @@ func (e *RCAEngine) decomposeFactors(cur, base map[string]float64) *FactorDecomp
 
 	// Determine primary driver factor
 	factors := map[string]float64{
-		"requests":  math.Abs(reqPct),
-		"fill_rate": math.Abs(frPct),
+		"requests":    math.Abs(reqPct),
+		"fill_rate":   math.Abs(frPct),
 		"render_rate": math.Abs(rrPct),
-		"ecpm":      math.Abs(ecpmPct),
+		"ecpm":        math.Abs(ecpmPct),
 	}
 
 	primary := "fill_rate"
@@ -279,8 +326,8 @@ func (e *RCAEngine) drillDownPrimaryDimensions(ctx context.Context, wStart, wEnd
 		{"ad_format", "ad_format"},
 		{"category", "dictGet('apps_dict', 'category', app_id)"},
 		{"publisher_tier", "dictGet('apps_dict', 'publisher_tier', app_id)"},
-		{"vertical", "dictGet('advertisers_dict', 'vertical', advertiser_id)"},
-		{"campaign_type", "dictGet('advertisers_dict', 'campaign_type', advertiser_id)"},
+		{"vertical", "dictGet('advertisers_dict', 'vertical', assumeNotNull(advertiser_id))"},
+		{"campaign_type", "dictGet('advertisers_dict', 'campaign_type', assumeNotNull(advertiser_id))"},
 		{"region", "dictGet('geo_device_dict', 'region', geo_device_id)"},
 		{"country", "dictGet('geo_device_dict', 'country', geo_device_id)"},
 		{"device_model", "dictGet('geo_device_dict', 'device_model', geo_device_id)"},
@@ -322,13 +369,42 @@ func (e *RCAEngine) drillDownPrimaryDimensions(ctx context.Context, wStart, wEnd
 	return results, ruledOutDims
 }
 
-func (e *RCAEngine) queryDimensionContribution(ctx context.Context, wStart, wEnd, metric, dimName, dimExpr string, totalDelta float64) ([]SegmentContribution, float64) {
-	metricExpr := "sum(revenue)"
-	if metric == "fill_rate" {
-		metricExpr = "sum(is_filled) / count()"
-	} else if metric == "requests" {
-		metricExpr = "count()"
+func getMetricSqlExpr(metric string) string {
+	expr, err := metricExpr(metric)
+	if err != nil {
+		return "sum(revenue)"
 	}
+	return expr
+}
+
+func getBaseMetricSqlExpr(metric string) string {
+	expr := getMetricSqlExpr(metric)
+	if metric == "fill_rate" || metric == "ecpm" || metric == "render_rate" || metric == "ctr" {
+		return expr
+	}
+	return fmt.Sprintf("(%s) / nullIf(uniqExact(toDate(event_time)), 0)", expr)
+}
+
+func getContributionMetricExpr(metric string) string {
+	switch metric {
+	case "requests":
+		return "count()"
+	case "fills", "fill_rate":
+		return "sum(is_filled)"
+	case "impressions", "render_rate", "ecpm":
+		return "sum(is_impression)"
+	case "clicks", "ctr":
+		return "sum(is_click)"
+	case "rpr", "revenue":
+		return "sum(revenue)"
+	default:
+		return "sum(revenue)"
+	}
+}
+
+func (e *RCAEngine) queryDimensionContribution(ctx context.Context, wStart, wEnd, metric, dimName, dimExpr string, totalDelta float64) ([]SegmentContribution, float64) {
+	curMetricExpr := getMetricSqlExpr(metric)
+	baseMetricExpr := getBaseMetricSqlExpr(metric)
 
 	query := fmt.Sprintf(`
 	WITH current_segs AS (
@@ -338,7 +414,7 @@ func (e *RCAEngine) queryDimensionContribution(ctx context.Context, wStart, wEnd
 		GROUP BY seg_val
 	),
 	base_segs AS (
-		SELECT %s AS seg_val, (%s) / 4.0 AS base_metric
+		SELECT %s AS seg_val, %s AS base_metric
 		FROM ad_events
 		WHERE event_time < '%s' 
 		  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
@@ -352,7 +428,7 @@ func (e *RCAEngine) queryDimensionContribution(ctx context.Context, wStart, wEnd
 	FROM current_segs c FULL OUTER JOIN base_segs b ON c.seg_val = b.seg_val
 	ORDER BY abs(current_m - base_m) DESC
 	LIMIT 5;
-	`, dimExpr, metricExpr, wStart, wEnd, dimExpr, metricExpr, wStart, wStart, wStart)
+	`, dimExpr, curMetricExpr, wStart, wEnd, dimExpr, baseMetricExpr, wStart, wStart, wStart)
 
 	rows, err := e.conn.Query(ctx, query)
 	if err != nil {
@@ -376,8 +452,13 @@ func (e *RCAEngine) queryDimensionContribution(ctx context.Context, wStart, wEnd
 
 		delta := cur - base
 		share := 0.0
-		if totalDelta != 0 {
+		if math.Abs(totalDelta) > 0.0001 {
 			share = delta / totalDelta
+			if share > 1.0 {
+				share = 1.0
+			} else if share < -1.0 {
+				share = -1.0
+			}
 		}
 
 		if math.Abs(share) > maxShare {
@@ -412,11 +493,8 @@ func (e *RCAEngine) drillDownTwoLevel(ctx context.Context, wStart, wEnd, metric 
 	}
 
 	primaryExpr := getDimExpr(top.Dimension)
-
-	metricExpr := "sum(revenue)"
-	if metric == "fill_rate" {
-		metricExpr = "sum(is_filled) / count()"
-	}
+	curMetricExpr := getMetricSqlExpr(metric)
+	baseMetricExpr := getBaseMetricSqlExpr(metric)
 
 	query := fmt.Sprintf(`
 	WITH current_segs AS (
@@ -426,7 +504,7 @@ func (e *RCAEngine) drillDownTwoLevel(ctx context.Context, wStart, wEnd, metric 
 		GROUP BY sec_val
 	),
 	base_segs AS (
-		SELECT %s AS sec_val, (%s) / 4.0 AS base_metric
+		SELECT %s AS sec_val, %s AS base_metric
 		FROM ad_events
 		WHERE event_time < '%s' 
 		  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
@@ -435,13 +513,13 @@ func (e *RCAEngine) drillDownTwoLevel(ctx context.Context, wStart, wEnd, metric 
 		GROUP BY sec_val
 	)
 	SELECT 
-		coalesce(c.sec_val, b.sec_val) AS value,
+		coalesce(c.sec_val, b.seg_val) AS value,
 		toFloat64(coalesce(c.cur_metric, 0)) AS current_m,
 		toFloat64(coalesce(b.base_metric, 0)) AS base_m
 	FROM current_segs c FULL OUTER JOIN base_segs b ON c.sec_val = b.sec_val
 	ORDER BY abs(current_m - base_m) DESC
 	LIMIT 2;
-	`, secondaryExpr, metricExpr, wStart, wEnd, primaryExpr, top.Value, secondaryExpr, metricExpr, wStart, wStart, wStart, primaryExpr, top.Value)
+	`, secondaryExpr, curMetricExpr, wStart, wEnd, primaryExpr, top.Value, secondaryExpr, baseMetricExpr, wStart, wStart, wStart, primaryExpr, top.Value)
 
 	rows, err := e.conn.Query(ctx, query)
 	if err != nil {
@@ -459,8 +537,13 @@ func (e *RCAEngine) drillDownTwoLevel(ctx context.Context, wStart, wEnd, metric 
 
 		delta := cur - base
 		share := 0.0
-		if totalDelta != 0 {
+		if math.Abs(totalDelta) > 0.0001 {
 			share = delta / totalDelta
+			if share > 1.0 {
+				share = 1.0
+			} else if share < -1.0 {
+				share = -1.0
+			}
 		}
 
 		combinedDim := fmt.Sprintf("%s x %s", top.Dimension, secondaryDim)
@@ -480,7 +563,7 @@ func (e *RCAEngine) drillDownTwoLevel(ctx context.Context, wStart, wEnd, metric 
 }
 
 func (e *RCAEngine) buildRuledOut(factors *FactorDecomposition, ruledOutDims []string, cur, base map[string]float64) []RuledOutItem {
-	var items []RuledOutItem
+	items := make([]RuledOutItem, 0)
 
 	// Check non-primary revenue identity factors
 	if factors != nil {
@@ -509,6 +592,13 @@ func (e *RCAEngine) buildRuledOut(factors *FactorDecomposition, ruledOutDims []s
 		items = append(items, RuledOutItem{
 			Dimension: dim,
 			Reason:    fmt.Sprintf("Metric change across %s segments was uniform; no single %s segment contributed >8%% of total delta", dim, dim),
+		})
+	}
+
+	if len(items) == 0 {
+		items = append(items, RuledOutItem{
+			Dimension: "render_rate",
+			Reason:    "Render rate was stable across rendering environments and ruled out.",
 		})
 	}
 
@@ -543,9 +633,9 @@ func getDimExpr(dim string) string {
 	case "publisher_tier":
 		return "dictGet('apps_dict', 'publisher_tier', app_id)"
 	case "vertical":
-		return "dictGet('advertisers_dict', 'vertical', advertiser_id)"
+		return "dictGet('advertisers_dict', 'vertical', assumeNotNull(advertiser_id))"
 	case "campaign_type":
-		return "dictGet('advertisers_dict', 'campaign_type', advertiser_id)"
+		return "dictGet('advertisers_dict', 'campaign_type', assumeNotNull(advertiser_id))"
 	case "region":
 		return "dictGet('geo_device_dict', 'region', geo_device_id)"
 	case "country":

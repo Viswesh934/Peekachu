@@ -8,6 +8,7 @@ export default async function rootRoutes(fastify: FastifyInstance) {
       endpoints: {
         health: "/health",
         models: "/v1/models",
+        metrics: "/v1/metrics",
         chat: "/v1/chat/completions",
       },
     };

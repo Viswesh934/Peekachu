@@ -3,6 +3,7 @@ import { VectorStoreIndex, Settings } from "llamaindex";
 import { getIndex } from "../../services/llamaIndex.js";
 import { getClickHouseService } from "../../services/clickhouse.js";
 import { getClickHouseMCPLLMClient } from "../../clickhouseMcpClient.js";
+import { DEFAULT_METRIC, detectMetricFromText } from "../../data/metrics.js";
 
 export default async function chatRoutes(fastify: FastifyInstance) {
   // Chat completions endpoint supporting ad-hoc ClickHouse MCP queries
@@ -30,6 +31,8 @@ export default async function chatRoutes(fastify: FastifyInstance) {
       reply.status(400);
       return { error: "No user query found in messages history." };
     }
+
+    const requestedMetric = detectMetricFromText(queryText) || DEFAULT_METRIC;
 
     try {
       const index = getIndex();
@@ -72,8 +75,8 @@ export default async function chatRoutes(fastify: FastifyInstance) {
         console.log(`DeepSeek LLM chat turn with ClickHouse context: "${queryText}"`);
 
         const prompt = dbContext
-          ? `System Context: You have access to ClickHouse Cloud database. ${dbContext}\n\nUser Question: ${queryText}`
-          : queryText;
+          ? `System Context: You have access to ClickHouse Cloud database. ${dbContext}\nPrimary metric: revenue. Default metric when unspecified: ${requestedMetric}.\n\nUser Question: ${queryText}`
+          : `Primary metric: revenue. Default metric when unspecified: ${requestedMetric}.\n\n${queryText}`;
 
         const llmResponse = await Settings.llm.complete({ prompt });
         const contentText = llmResponse.text;

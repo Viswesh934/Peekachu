@@ -10,7 +10,8 @@
     "dev": "tsx src/index.ts",
     "traffic": "tsx src/trafficGenerator.ts",
     "db:init": "tsx src/scripts/initDb.ts",
-    "db:check": "tsx src/scripts/checkDb.ts"
+    "db:check": "tsx src/scripts/checkDb.ts",
+    "eval": "tsx src/scripts/evals.ts"
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "^5.2.0",

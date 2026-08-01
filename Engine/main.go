@@ -1,6 +1,8 @@
 package main
 
 import (
+	"database/sql"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -49,7 +51,11 @@ func main() {
 
 		evidence, err := engine.PerformAnalysis(r.Context(), req)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			if errors.Is(err, sql.ErrNoRows) {
+				w.WriteHeader(http.StatusNotFound)
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
@@ -66,7 +72,11 @@ func main() {
 
 		anomaly, err := engine.FindTopAnomaly(r.Context(), metric)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			if errors.Is(err, sql.ErrNoRows) {
+				w.WriteHeader(http.StatusNotFound)
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
