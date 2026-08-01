@@ -9,6 +9,7 @@ import rootRoutes from "./routes/root.js";
 import healthRoutes from "./routes/health.js";
 import modelsRoutes from "./routes/v1/models.js";
 import chatRoutes from "./routes/v1/chat.js";
+import rcaRoutes from "./routes/v1/rca.js";
 import simulationRoutes from "./routes/simulation.js";
 import deepseekRoutes from "./routes/v1/deepseek.js";
 
@@ -33,6 +34,7 @@ await fastify.register(rootRoutes);
 await fastify.register(healthRoutes);
 await fastify.register(modelsRoutes);
 await fastify.register(chatRoutes);
+await fastify.register(rcaRoutes);
 await fastify.register(simulationRoutes);
 await fastify.register(deepseekRoutes);
 
