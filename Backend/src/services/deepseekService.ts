@@ -22,7 +22,10 @@ function getLangfuseSecretKey() {
 }
 
 function getLangfuseHost() {
-  return process.env.LANGFUSE_HOST || process.env.LANGFUSE_BASE_URL || "https://cloud.langfuse.com";
+  if (process.env.LANGFUSE_HOST) return process.env.LANGFUSE_HOST;
+  if (process.env.LANGFUSE_BASE_URL) return process.env.LANGFUSE_BASE_URL;
+  if (process.env.LANGFUSE_PORT) return `http://localhost:${process.env.LANGFUSE_PORT}`;
+  return "https://cloud.langfuse.com";
 }
 
 /**

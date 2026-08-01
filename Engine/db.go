@@ -63,7 +63,7 @@ func ConnectClickHouse() (driver.Conn, error) {
 			Username: username,
 			Password: password,
 		},
-		DialTimeout:     5 * time.Second,
+		DialTimeout:     30 * time.Second,
 		MaxOpenConns:    32,
 		MaxIdleConns:    16,
 		ConnMaxLifetime: 10 * time.Minute,
@@ -86,7 +86,7 @@ func ConnectClickHouse() (driver.Conn, error) {
 		return nil, fmt.Errorf("failed to open clickhouse connection: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := conn.Ping(ctx); err != nil {
 		// If native connection fails, try fallback to HTTP on 8443

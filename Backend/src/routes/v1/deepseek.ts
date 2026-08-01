@@ -7,7 +7,7 @@ export default async function deepseekRoutes(fastify: FastifyInstance) {
     const hasDeepSeekKey = Boolean(process.env.DEEPSEEK_API_KEY);
     const hasLangfusePublic = Boolean(process.env.LANGFUSE_PUBLIC_KEY);
     const hasLangfuseSecret = Boolean(process.env.LANGFUSE_SECRET_KEY);
-    const langfuseHost = process.env.LANGFUSE_HOST || process.env.LANGFUSE_BASE_URL || "https://cloud.langfuse.com";
+    const langfuseHost = process.env.LANGFUSE_HOST || process.env.LANGFUSE_BASE_URL || (process.env.LANGFUSE_PORT ? `http://localhost:${process.env.LANGFUSE_PORT}` : "https://cloud.langfuse.com");
 
     const missingCredentials: string[] = [];
     if (!hasDeepSeekKey) missingCredentials.push("DEEPSEEK_API_KEY");

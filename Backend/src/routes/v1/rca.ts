@@ -22,8 +22,8 @@ export default async function rcaRoutes(fastify: FastifyInstance) {
     }
 
     try {
-      // 1. Call Go RCA Engine
-      const goEngineUrl = process.env.RCA_ENGINE_URL || 'http://localhost:8081/analyze'
+      const enginePort = process.env.RCA_ENGINE_PORT || '8082'
+      const goEngineUrl = process.env.RCA_ENGINE_URL || `http://localhost:${enginePort}/analyze`
       reqLogInfo(fastify, `Delegating RCA calculation to Go Engine at ${goEngineUrl}...`)
 
       const rcaRes = await fetch(goEngineUrl, {
@@ -122,16 +122,21 @@ INSTRUCTIONS:
         } : {})
       }
     } catch (err: any) {
+      console.error('RCA ANALYZE ERROR CAUSE:', err?.cause || err)
       fastify.log.error('RCA analyze endpoint failed:', err)
       reply.status(500)
-      return { error: `RCA analysis failed: ${err.message || err}` }
+      const causeDetails = err?.cause ? ` (cause: ${err.cause.message || err.cause.code || JSON.stringify(err.cause)})` : '';
+      return { error: `RCA analysis failed: ${err.message || err}${causeDetails}` }
     }
   })
 
   // Get detected anomalies stream
   fastify.get('/detect', async (request, reply) => {
     try {
-      const goDetectUrl = process.env.RCA_ENGINE_DETECT_URL || 'http://localhost:8081/detect'
+      const metric = (request.query as any)?.metric
+      const enginePort = process.env.RCA_ENGINE_PORT || '8082'
+      const defaultDetectUrl = `http://localhost:${enginePort}/detect${metric ? `?metric=${encodeURIComponent(metric)}` : ''}`
+      const goDetectUrl = process.env.RCA_ENGINE_DETECT_URL || defaultDetectUrl
       const res = await fetch(goDetectUrl)
       if (!res.ok) {
         reply.status(res.status)
@@ -140,7 +145,8 @@ INSTRUCTIONS:
       return await res.json()
     } catch (err: any) {
       reply.status(500)
-      return { error: err.message }
+      const target = process.env.RCA_ENGINE_DETECT_URL || `http://127.0.0.1:${process.env.RCA_ENGINE_PORT || '8082'}/detect`
+      return { error: `fetch failed trying to connect to ${target}: ${err.message || err}` }
     }
   })
 
