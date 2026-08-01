@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { Settings } from 'llamaindex'
 import { trace } from '@opentelemetry/api'
-import { traceRCAInvestigation } from '../../services/langfuseRcaService.js'
+import { traceRCAInvestigation, evaluateFaithfulness } from '../../services/langfuseRcaService.js'
 import { getClickHouseService } from '../../services/clickhouse.js'
 import { generateTextEmbedding } from '../../services/embeddingService.js'
 
@@ -80,6 +80,13 @@ INSTRUCTIONS:
         try {
           const llmRes = await Settings.llm.complete({ prompt: promptText })
           diagnosis = llmRes.text
+          
+          // Number-verification guard: verify every numeric figure in LLM response against ClickHouse evidence bundle
+          const faithEval = evaluateFaithfulness(diagnosis, evidence)
+          if (faithEval.hallucinationDetected) {
+            fastify.log.warn({ unsupportedNumbers: faithEval.unsupportedNumbers }, 'LLM generated unsupported numbers not in evidence bundle. Falling back to deterministic diagnosis guard.')
+            diagnosis = generateFallbackDiagnosis(evidence)
+          }
         } catch (llmErr) {
           fastify.log.error(llmErr, 'LLM narration error')
           diagnosis = generateFallbackDiagnosis(evidence)
