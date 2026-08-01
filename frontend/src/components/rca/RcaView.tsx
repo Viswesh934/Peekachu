@@ -8,14 +8,33 @@ interface RcaViewProps {
   anomalies: AnomalyIncident[];
   onApprove: (id: string) => void;
   onFlagHallucination: (id: string, reason: string, feedback: string) => void;
+  onUpdateAnomaly?: (updated: AnomalyIncident) => void;
 }
 
-export const RcaView: React.FC<RcaViewProps> = ({ anomalies, onApprove, onFlagHallucination }) => {
+export const RcaView: React.FC<RcaViewProps> = ({ anomalies, onApprove, onFlagHallucination, onUpdateAnomaly }) => {
   const [showTracePanel, setShowTracePanel] = useState(false);
   const [isDemoReplaying, setIsDemoReplaying] = useState(false);
   const [demoStep, setDemoStep] = useState<number | null>(null);
+  // Track the most recent analysed anomaly so the trace panel stays in sync
+  const [liveAnomaly, setLiveAnomaly] = useState<AnomalyIncident | undefined>(anomalies[0]);
 
-  const selectedAnomaly = anomalies[0];
+  // Keep liveAnomaly in sync when the prop changes (e.g. initial load or external update)
+  React.useEffect(() => {
+    if (anomalies.length > 0) {
+      setLiveAnomaly((current) => {
+        if (!current) return anomalies[0];
+        const match = anomalies.find((a) => a.id === current.id);
+        return match || current;
+      });
+    }
+  }, [anomalies]);
+
+  const selectedAnomaly = liveAnomaly ?? anomalies[0];
+
+  const handleAnalysisComplete = (updated: AnomalyIncident) => {
+    setLiveAnomaly(updated);
+    onUpdateAnomaly?.(updated);
+  };
 
   const handleReplayDemo = () => {
     setIsDemoReplaying(true);
@@ -28,11 +47,19 @@ export const RcaView: React.FC<RcaViewProps> = ({ anomalies, onApprove, onFlagHa
     }, 3600);
   };
 
+  const llmModel = selectedAnomaly?.llmMetrics?.model ?? 'deepseek-chat';
+  const llmProvider = selectedAnomaly?.llmMetrics?.provider ?? 'DeepSeek';
+  const llmLatency = selectedAnomaly?.llmMetrics?.latencyMs;
+
   const DEMO_STEPS = [
     { label: 'Anomaly Triggered', sub: '|Z| ≥ 3.0', color: 'amber' },
     { label: 'ClickHouse Fan-out', sub: 'SQL Parallel Queries', color: 'blue' },
     { label: 'Metric Tree Eval', sub: 'Contribution Scoring', color: 'red' },
-    { label: 'DeepSeek Narration', sub: 'Verbatim RCA', color: 'green' },
+    {
+      label: `${llmProvider} Narration`,
+      sub: `${llmModel}${llmLatency != null ? ` · ${llmLatency}ms` : ''} · LLM constrained verbatim`,
+      color: 'green',
+    },
   ];
 
   return (
@@ -45,7 +72,7 @@ export const RcaView: React.FC<RcaViewProps> = ({ anomalies, onApprove, onFlagHa
           </div>
           <div>
             <h2 className="text-[14px] font-bold text-slate-900 leading-tight">Root Cause Analysis Workbench</h2>
-            <p className="text-[11px] text-slate-400 leading-tight">ClickHouse · Go Worker Pool · DeepSeek LLM</p>
+            <p className="text-[11px] text-slate-400 leading-tight">ClickHouse · Go Worker Pool · {llmProvider} {llmModel}</p>
           </div>
         </div>
 
@@ -101,12 +128,13 @@ export const RcaView: React.FC<RcaViewProps> = ({ anomalies, onApprove, onFlagHa
         {/* RCA Analysis Workbench (GET & SET) */}
         <div className={`${showTracePanel ? 'lg:col-span-9' : 'lg:col-span-12'} min-h-0 overflow-y-auto`}>
           {selectedAnomaly ? (
-            <RcaDetailDrawer
+          <RcaDetailDrawer
               anomaly={selectedAnomaly}
               onApprove={onApprove}
               onFlagHallucination={onFlagHallucination}
               onOpenLangfuseTrace={() => setShowTracePanel((v) => !v)}
               onOpenChatAgent={() => {}}
+              onAnalysisComplete={handleAnalysisComplete}
               isTraceOpen={showTracePanel}
             />
           ) : (
@@ -122,6 +150,7 @@ export const RcaView: React.FC<RcaViewProps> = ({ anomalies, onApprove, onFlagHa
             <LangfuseTracePanel
               telemetry={selectedAnomaly?.langfuse}
               executionTimeMs={selectedAnomaly?.evidence?.execution_time_ms}
+              llmMetrics={selectedAnomaly?.llmMetrics}
               onClose={() => setShowTracePanel(false)}
             />
           </div>

@@ -12,7 +12,8 @@
     "db:init": "tsx src/scripts/initDb.ts",
     "db:check": "tsx src/scripts/checkDb.ts",
     "db:populate-rollup": "tsx src/scripts/populateRollup.ts",
-    "eval": "tsx src/scripts/evals.ts"
+    "eval": "tsx src/scripts/evals.ts",
+    "benchmark:engine": "tsx src/scripts/benchmarkGoEngine.ts"
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "^5.2.0",
