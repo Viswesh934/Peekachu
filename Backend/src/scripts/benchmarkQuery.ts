@@ -4,12 +4,16 @@ import { fileURLToPath } from 'url';
 import { createClient } from '@clickhouse/client';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: [path.resolve(__dirname, '../../.env'), path.resolve(__dirname, '../.env'), '.env'] });
+dotenv.config({ path: [path.resolve(__dirname, '../../../.env'), path.resolve(__dirname, '../../.env'), path.resolve(__dirname, '../.env'), '.env'] });
 
 async function benchmark() {
-  const url = process.env.CLICKHOUSE_URL || 'https://v8k6il94hg.ap-south-1.aws.clickhouse.cloud:8443';
+  const url = process.env.CLICKHOUSE_URL;
   const username = process.env.CLICKHOUSE_USERNAME || 'default';
-  const password = process.env.CLICKHOUSE_PASSWORD || 'i2D_29fLWj8i3';
+  const password = process.env.CLICKHOUSE_PASSWORD;
+
+  if (!url || !password) {
+    throw new Error('CLICKHOUSE_URL and CLICKHOUSE_PASSWORD environment variables are required.');
+  }
 
   console.log(`⚡ Connecting to ClickHouse Cloud at ${url}...`);
   const ch = createClient({ url, username, password });
