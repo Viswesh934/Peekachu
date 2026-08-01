@@ -43,6 +43,7 @@ export interface LangfuseTelemetry {
   hallucinationDetected: boolean;
   status: string;
   sqlSpansCount?: number;
+  executionTimeMs?: number;
 }
 
 export interface RCAEvidence {

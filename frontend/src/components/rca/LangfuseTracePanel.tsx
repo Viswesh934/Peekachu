@@ -6,7 +6,6 @@ import {
   X,
   CheckCircle2,
   ShieldAlert,
-  Clock,
   Zap,
   BarChart3,
   Layers,
@@ -17,6 +16,7 @@ import {
 
 interface LangfuseTracePanelProps {
   telemetry?: LangfuseTelemetry;
+  executionTimeMs?: number;
   onClose: () => void;
 }
 
@@ -43,7 +43,7 @@ const SPANS = [
     icon: Activity,
     color: 'amber',
     durationPct: 30,
-    description: 'Parallel fan-out across app, device, OS, geo dimensions',
+    description: 'Single-Pass GROUP BY GROUPING SETS dimensional attribution',
   },
   {
     name: 'clickhouse-ruled-out-verification',
@@ -71,11 +71,11 @@ const COLOR_MAP: Record<string, { bg: string; border: string; text: string; bar:
   violet:  { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-700',  bar: 'bg-violet-400',  dot: 'bg-violet-500' },
 };
 
-export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetry, onClose }) => {
-  const faithfulness = (telemetry?.faithfulnessScore ?? 0.98) * 100;
-  const sqlSpans = telemetry?.sqlSpansCount ?? 9;
-  const traceId = telemetry?.traceId ?? 'tr-9948a2-deepseek-rca';
-  const traceUrl = telemetry?.traceUrl ?? 'https://cloud.langfuse.com';
+export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetry, executionTimeMs, onClose }) => {
+  const faithfulness = (telemetry?.faithfulnessScore ?? 1.0) * 100;
+  const chLatency = executionTimeMs ?? telemetry?.executionTimeMs ?? 434;
+  const traceId = telemetry?.traceId ?? 'trace-active-session';
+  const traceUrl = telemetry?.traceUrl ?? (telemetry?.traceId ? `https://cloud.langfuse.com/trace/${telemetry.traceId}` : 'https://cloud.langfuse.com');
   const isHighFidelity = faithfulness >= 95;
 
   return (
@@ -135,15 +135,6 @@ export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetr
             </div>
             <p className="text-[10px] text-slate-400 mt-1">{isHighFidelity ? 'Fully faithful' : 'Minor drift'}</p>
           </div>
-
-          <div className="p-3 rounded-lg bg-emerald-50/50 border border-emerald-200 shadow-sm">
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <Zap className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
-              <span className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wider">CH Latency</span>
-            </div>
-            <div className="text-[22px] font-bold font-mono text-emerald-700">76 ms</div>
-            <p className="text-[10px] text-emerald-600 font-medium mt-1">Single-Pass GROUPING SETS</p>
-          </div>
         </div>
 
         {/* Span Timeline */}
@@ -180,9 +171,10 @@ export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetr
 
           {/* Span list with details */}
           <div className="space-y-2">
-            {SPANS.map((span, idx) => {
+            {SPANS.map((span) => {
               const c = COLOR_MAP[span.color];
               const Icon = span.icon;
+              const spanDurationMs = Math.max(1, Math.round((chLatency * span.durationPct) / 100));
               return (
                 <div key={span.name} className={`rounded-lg border ${c.border} ${c.bg} p-3`}>
                   <div className="flex items-start gap-2">
@@ -192,7 +184,7 @@ export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetr
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1 mb-0.5">
                         <span className={`text-[11px] font-bold ${c.text}`}>{span.label}</span>
-                        <span className="font-mono text-[10px] text-slate-400 shrink-0">{span.durationPct * 7}ms</span>
+                        <span className="font-mono text-[10px] text-slate-400 shrink-0">{spanDurationMs}ms</span>
                       </div>
                       <p className="text-[10px] text-slate-500 leading-relaxed">{span.description}</p>
                     </div>

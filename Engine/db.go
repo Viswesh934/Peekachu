@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,10 +15,42 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
+func loadEnvFile() {
+	cwd, _ := os.Getwd()
+	paths := []string{
+		filepath.Join(cwd, ".env"),
+		filepath.Join(cwd, "../.env"),
+		"/workspaces/Peekachu/.env",
+	}
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				val := strings.TrimSpace(parts[1])
+				if os.Getenv(key) == "" {
+					os.Setenv(key, val)
+				}
+			}
+		}
+	}
+}
+
 func ConnectClickHouse() (driver.Conn, error) {
+	loadEnvFile()
+
 	chURL := os.Getenv("CLICKHOUSE_URL")
 	if chURL == "" {
-		chURL = "https://v8k6il94hg.ap-south-1.aws.clickhouse.cloud:8443"
+		return nil, fmt.Errorf("CLICKHOUSE_URL environment variable is missing")
 	}
 	username := os.Getenv("CLICKHOUSE_USERNAME")
 	if username == "" {
@@ -25,34 +58,30 @@ func ConnectClickHouse() (driver.Conn, error) {
 	}
 	password := os.Getenv("CLICKHOUSE_PASSWORD")
 	if password == "" {
-		password = "i2D_29fLWj8i3"
+		return nil, fmt.Errorf("CLICKHOUSE_PASSWORD environment variable is missing")
 	}
 
 	// Parse host and port from URL
 	parsedURL, err := url.Parse(chURL)
-	var host string
-	var port uint16 = 9440
-	useTLS := true
-	useHTTP := false
-
-	if err == nil {
-		host = parsedURL.Hostname()
-		pStr := parsedURL.Port()
-		if pStr != "" {
-			pInt, _ := strconv.Atoi(pStr)
-			if pInt > 0 {
-				port = uint16(pInt)
-			}
-		}
-		if parsedURL.Scheme == "http" {
-			useTLS = false
-		}
-		if port == 8443 || port == 80 {
-			useHTTP = true
-		}
-	} else {
-		host = "v8k6il94hg.ap-south-1.aws.clickhouse.cloud"
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse CLICKHOUSE_URL '%s': %w", chURL, err)
 	}
+
+	host := parsedURL.Hostname()
+	if host == "" {
+		return nil, fmt.Errorf("invalid CLICKHOUSE_URL '%s': host is empty", chURL)
+	}
+
+	var port uint16 = 9440
+	pStr := parsedURL.Port()
+	if pStr != "" {
+		if pInt, err := strconv.Atoi(pStr); err == nil && pInt > 0 {
+			port = uint16(pInt)
+		}
+	}
+
+	useTLS := parsedURL.Scheme != "http"
+	useHTTP := port == 8443 || port == 80 || parsedURL.Scheme == "http" || parsedURL.Scheme == "https"
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 
