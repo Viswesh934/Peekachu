@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AnomalyIncident, HumanReviewStatus, ChatMessage } from '../../types';
 import { HumanLoopControls } from './HumanLoopControls';
+import { MetricTreeVisualizer } from './MetricTreeVisualizer';
 import { sendChatMessage, triggerRcaAnalysis } from '../../services/api';
 import {
   BrainCircuit,
@@ -41,8 +42,9 @@ export const RcaDetailDrawer: React.FC<RcaDetailDrawerProps> = ({
   onOpenLangfuseTrace,
   onOpenChatAgent,
 }) => {
+  const [liveAnomaly, setLiveAnomaly] = useState<AnomalyIncident>(anomaly);
   const [selectedMetric, setSelectedMetric] = useState<string>(anomaly.metric || 'revenue');
-  const [selectedWindow, setSelectedWindow] = useState<string>('2026-08-01 14:00:00 to 15:00:00');
+  const [selectedWindow, setSelectedWindow] = useState<string>(`${anomaly.window_start} to ${anomaly.window_end}`);
   const [isRunningAnalysis, setIsRunningAnalysis] = useState(false);
   const [showRawEvidence, setShowRawEvidence] = useState(false);
 
@@ -58,12 +60,24 @@ export const RcaDetailDrawer: React.FC<RcaDetailDrawerProps> = ({
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
 
-  const { evidence } = anomaly;
-  const isAnomalous = Math.abs(anomaly.z_score) >= 3.0;
+  const { evidence } = liveAnomaly;
+  const isAnomalous = Math.abs(liveAnomaly.z_score) >= 3.0;
+
+  React.useEffect(() => {
+    setLiveAnomaly(anomaly);
+    setSelectedMetric(anomaly.metric || 'revenue');
+    setSelectedWindow(`${anomaly.window_start} to ${anomaly.window_end}`);
+  }, [anomaly]);
 
   const handleRunAnalysis = async () => {
     setIsRunningAnalysis(true);
-    await triggerRcaAnalysis(selectedMetric, '2026-08-01 14:00:00', '2026-08-01 15:00:00');
+    const [windowStart, windowEnd] = selectedWindow.split(' to ');
+    const result = await triggerRcaAnalysis(selectedMetric, windowStart?.trim(), windowEnd?.trim());
+    setLiveAnomaly({
+      ...result,
+      id: anomaly.id,
+      humanReview: anomaly.humanReview,
+    });
     setTimeout(() => {
       setIsRunningAnalysis(false);
     }, 1200);
@@ -161,7 +175,7 @@ export const RcaDetailDrawer: React.FC<RcaDetailDrawerProps> = ({
             </div>
             <div>
               <span className="text-xs font-mono text-slate-400">ANALYSIS RESULT PANEL</span>
-              <h2 className="text-xl font-extrabold text-white">{anomaly.title}</h2>
+              <h2 className="text-xl font-extrabold text-white">{liveAnomaly.title}</h2>
             </div>
           </div>
 
@@ -192,40 +206,48 @@ export const RcaDetailDrawer: React.FC<RcaDetailDrawerProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs pt-1">
           <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800">
             <span className="text-slate-400 block font-medium">Baseline Value</span>
-            <span className="text-lg font-extrabold text-slate-200 font-mono mt-0.5 block">
-              ${anomaly.baseline_value.toLocaleString()}
+              <span className="text-lg font-extrabold text-slate-200 font-mono mt-0.5 block">
+              ${liveAnomaly.baseline_value.toLocaleString()}
             </span>
           </div>
           <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800">
             <span className="text-slate-400 block font-medium">Current Metric Value</span>
             <span className="text-lg font-extrabold text-rose-400 font-mono mt-0.5 block">
-              ${anomaly.current_value.toLocaleString()}
+              ${liveAnomaly.current_value.toLocaleString()}
             </span>
           </div>
           <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800">
             <span className="text-slate-400 block font-medium">Net Delta & % Change</span>
             <span className="text-lg font-extrabold text-rose-400 flex items-center gap-1 font-mono mt-0.5">
-              <TrendingDown className="w-4 h-4" /> {anomaly.pct_change}% (${anomaly.evidence.delta.toLocaleString()})
+              <TrendingDown className="w-4 h-4" /> {liveAnomaly.pct_change}% (${(liveAnomaly.evidence?.delta ?? (liveAnomaly as any).delta ?? 0).toLocaleString()})
             </span>
           </div>
           <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800">
             <span className="text-slate-400 block font-medium">Z-Score Deviation</span>
             <span className="text-lg font-extrabold text-amber-300 font-mono mt-0.5 block">
-              Z = {anomaly.z_score}
+              Z = {liveAnomaly.z_score}
             </span>
           </div>
         </div>
       </div>
 
+      {/* ClickHouse Metric Decomposition Tree (Green / Amber / Red Status Lights) */}
+      <MetricTreeVisualizer
+        metric={liveAnomaly.metric}
+        factorDecomp={evidence?.factor_decomposition}
+        topSegments={evidence?.top_contributing_segments || []}
+        ruledOut={evidence?.ruled_out || []}
+      />
+
       {/* Human-in-the-Loop Control Panel (Buttons 1 & 2) */}
       <HumanLoopControls
-        status={anomaly.humanReview.status}
-        reviewedAt={anomaly.humanReview.reviewedAt}
-        reviewedBy={anomaly.humanReview.reviewedBy}
-        hallucinationReason={anomaly.humanReview.hallucinationReason}
-        feedbackNote={anomaly.humanReview.feedbackNote}
-        onApprove={() => onApprove(anomaly.id)}
-        onFlagHallucination={(reason, feedback) => onFlagHallucination(anomaly.id, reason, feedback)}
+        status={liveAnomaly.humanReview.status}
+        reviewedAt={liveAnomaly.humanReview.reviewedAt}
+        reviewedBy={liveAnomaly.humanReview.reviewedBy}
+        hallucinationReason={liveAnomaly.humanReview.hallucinationReason}
+        feedbackNote={liveAnomaly.humanReview.feedbackNote}
+        onApprove={() => onApprove(liveAnomaly.id)}
+        onFlagHallucination={(reason, feedback) => onFlagHallucination(liveAnomaly.id, reason, feedback)}
       />
 
       {/* DeepSeek AI Plain-Language Diagnosis */}
@@ -235,7 +257,7 @@ export const RcaDetailDrawer: React.FC<RcaDetailDrawerProps> = ({
           <span>DeepSeek AI LLM Narrative Explanation</span>
         </div>
         <p className="text-xs text-slate-200 leading-relaxed font-sans bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
-          {anomaly.diagnosisText}
+          {liveAnomaly.diagnosisText}
         </p>
       </div>
 
@@ -252,30 +274,38 @@ export const RcaDetailDrawer: React.FC<RcaDetailDrawerProps> = ({
           </div>
 
           <div className="space-y-3">
-            {evidence.top_contributing_segments.map((seg, idx) => (
-              <div key={idx} className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-white">
-                    {idx + 1}. {seg.dimension}: <span className="text-brand-300">{seg.value}</span>
-                  </span>
-                  <span className="font-mono font-extrabold text-amber-300 text-sm">
-                    {(seg.share_of_delta * 100).toFixed(1)}% Share of Delta
-                  </span>
+            {(evidence?.top_contributing_segments || []).map((seg, idx) => {
+              const baseVal = seg.baseline_metric ?? (seg as any).base_metric ?? 0;
+              const curVal = seg.current_metric ?? (seg as any).current_m ?? 0;
+              const deltaVal = seg.segment_delta ?? 0;
+              return (
+                <div key={idx} className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-white">
+                      {idx + 1}. {seg.dimension}: <span className="text-brand-300">{seg.value}</span>
+                    </span>
+                    <span className="font-mono font-extrabold text-amber-300 text-sm">
+                      {(seg.share_of_delta * 100).toFixed(1)}% Share of Delta
+                    </span>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-amber-500 to-rose-500 h-full rounded-full"
+                      style={{ width: `${Math.min(100, Math.max(0, seg.share_of_delta * 100))}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                    <span>Baseline: ${baseVal.toLocaleString()}</span>
+                    <span>Current: ${curVal.toLocaleString()}</span>
+                    <span className="text-rose-400">Delta: ${deltaVal.toLocaleString()}</span>
+                  </div>
                 </div>
-                {/* Progress bar */}
-                <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                  <div
-                    className="bg-gradient-to-r from-amber-500 to-rose-500 h-full rounded-full"
-                    style={{ width: `${Math.min(100, seg.share_of_delta * 100)}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                  <span>Baseline: ${seg.baseline_metric.toLocaleString()}</span>
-                  <span>Current: ${seg.current_metric.toLocaleString()}</span>
-                  <span className="text-rose-400">Delta: ${seg.segment_delta.toLocaleString()}</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
+            {(!evidence?.top_contributing_segments || evidence.top_contributing_segments.length === 0) && (
+              <p className="text-xs text-slate-400 font-mono">No top contributing segments found for this window.</p>
+            )}
           </div>
         </div>
 
@@ -286,15 +316,18 @@ export const RcaDetailDrawer: React.FC<RcaDetailDrawerProps> = ({
             <span>Ruled-Out Dimensions (Cleared)</span>
           </div>
           <div className="space-y-2.5">
-            {evidence.ruled_out.map((item, idx) => (
+            {(evidence?.ruled_out || []).map((item, idx) => (
               <div key={idx} className="flex items-start gap-2.5 p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-xs">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <div>
-                  <span className="font-bold text-slate-200 capitalize">{item.dimension.replace('_', ' ')}: </span>
+                  <span className="font-bold text-slate-200 capitalize">{item.dimension?.replace('_', ' ')}: </span>
                   <span className="text-slate-400 leading-relaxed block mt-0.5">{item.reason}</span>
                 </div>
               </div>
             ))}
+            {(!evidence?.ruled_out || evidence.ruled_out.length === 0) && (
+              <p className="text-xs text-slate-400 font-mono">No ruled-out factors recorded.</p>
+            )}
           </div>
         </div>
       </div>
@@ -309,7 +342,7 @@ export const RcaDetailDrawer: React.FC<RcaDetailDrawerProps> = ({
             <Code2 className="w-4 h-4 text-emerald-400" />
             <span>Computed Evidence & ClickHouse Trace Payload (Deterministic JSON)</span>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-              {evidence.execution_time_ms}ms Execution
+              {evidence?.execution_time_ms ?? 0}ms Execution
             </span>
           </div>
           {showRawEvidence ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}

@@ -56,11 +56,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Crown className="w-5 h-5 animate-pulse text-amber-400" />
           </div>
           <div>
-            <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
-              Primary Revenue Command Center
+              <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
+              Secondary Revenue Overview
             </h4>
             <p className="text-xs text-slate-300">
-              All anomaly detection, z-score calculations, and RCA identity breakdowns are focused on <strong className="text-emerald-400">Revenue ($)</strong>.
+              Use this panel for context and monitoring after the main RCA result has been inspected.
             </p>
           </div>
         </div>

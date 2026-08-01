@@ -67,7 +67,14 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		metric := r.URL.Query().Get("metric")
 		if metric == "" {
-			metric = "revenue"
+			anomalies, err := engine.FindAllAnomalies(r.Context())
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(anomalies)
+			return
 		}
 
 		anomaly, err := engine.FindTopAnomaly(r.Context(), metric)

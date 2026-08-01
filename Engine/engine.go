@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -214,6 +215,28 @@ func (e *RCAEngine) PerformAnalysis(ctx context.Context, req AnalyzeRequest) (*R
 	}, nil
 }
 
+func sanitize(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
+func (e *RCAEngine) FindAllAnomalies(ctx context.Context) ([]AnomalyRecord, error) {
+	metrics := []string{"revenue", "fill_rate", "render_rate", "ecpm", "ctr"}
+	var results []AnomalyRecord
+
+	for _, m := range metrics {
+		rec, err := e.FindTopAnomaly(ctx, m)
+		if err == nil && rec != nil {
+			results = append(results, *rec)
+		}
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return math.Abs(results[i].ZScore) > math.Abs(results[j].ZScore)
+	})
+
+	return results, nil
+}
+
 func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, wEnd string) (map[string]float64, map[string]float64, error) {
 	query := fmt.Sprintf(`
 	WITH current_period AS (
@@ -236,13 +259,14 @@ func (e *RCAEngine) getMetricsForWindowAndBaseline(ctx context.Context, wStart, 
 		FROM ad_events
 		WHERE event_time < '%s' 
 		  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
-		  AND toHour(event_time) = toHour(toDateTime('%s'))
+		  AND toHour(event_time) >= toHour(toDateTime('%s'))
+		  AND toHour(event_time) < toHour(toDateTime('%s'))
 	)
 	SELECT 
 		toFloat64(c.requests), toFloat64(c.fills), toFloat64(c.impressions), toFloat64(c.clicks), toFloat64(c.revenue),
 		toFloat64(b.requests), toFloat64(b.fills), toFloat64(b.impressions), toFloat64(b.clicks), toFloat64(b.revenue)
 	FROM current_period c CROSS JOIN baseline_period b;
-	`, wStart, wEnd, wStart, wStart, wStart)
+	`, wStart, wEnd, wStart, wStart, wStart, wEnd)
 
 	row := e.conn.QueryRow(ctx, query)
 
@@ -418,7 +442,8 @@ func (e *RCAEngine) queryDimensionContribution(ctx context.Context, wStart, wEnd
 		FROM ad_events
 		WHERE event_time < '%s' 
 		  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
-		  AND toHour(event_time) = toHour(toDateTime('%s'))
+		  AND toHour(event_time) >= toHour(toDateTime('%s'))
+		  AND toHour(event_time) < toHour(toDateTime('%s'))
 		GROUP BY seg_val
 	)
 	SELECT 
@@ -428,7 +453,7 @@ func (e *RCAEngine) queryDimensionContribution(ctx context.Context, wStart, wEnd
 	FROM current_segs c FULL OUTER JOIN base_segs b ON c.seg_val = b.seg_val
 	ORDER BY abs(current_m - base_m) DESC
 	LIMIT 5;
-	`, dimExpr, curMetricExpr, wStart, wEnd, dimExpr, baseMetricExpr, wStart, wStart, wStart)
+	`, dimExpr, curMetricExpr, wStart, wEnd, dimExpr, baseMetricExpr, wStart, wStart, wStart, wEnd)
 
 	rows, err := e.conn.Query(ctx, query)
 	if err != nil {
@@ -483,18 +508,60 @@ func (e *RCAEngine) drillDownTwoLevel(ctx context.Context, wStart, wEnd, metric 
 		return nil
 	}
 
-	// Pick top primary segment
-	top := topPrimary[0]
-	secondaryDim := "region"
-	secondaryExpr := "dictGet('geo_device_dict', 'region', geo_device_id)"
-	if top.Dimension == "region" {
-		secondaryDim = "device_model"
-		secondaryExpr = "dictGet('geo_device_dict', 'device_model', geo_device_id)"
+	allDims := []struct {
+		Name string
+		Expr string
+	}{
+		{"ad_format", "ad_format"},
+		{"category", "dictGet('apps_dict', 'category', app_id)"},
+		{"publisher_tier", "dictGet('apps_dict', 'publisher_tier', app_id)"},
+		{"vertical", "dictGet('advertisers_dict', 'vertical', assumeNotNull(advertiser_id))"},
+		{"campaign_type", "dictGet('advertisers_dict', 'campaign_type', assumeNotNull(advertiser_id))"},
+		{"region", "dictGet('geo_device_dict', 'region', geo_device_id)"},
+		{"country", "dictGet('geo_device_dict', 'country', geo_device_id)"},
+		{"device_model", "dictGet('geo_device_dict', 'device_model', geo_device_id)"},
+		{"os_version", "dictGet('geo_device_dict', 'os_version', geo_device_id)"},
 	}
 
-	primaryExpr := getDimExpr(top.Dimension)
+	var results []SegmentContribution
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	maxPrimaryToDrill := 2
+	if len(topPrimary) < maxPrimaryToDrill {
+		maxPrimaryToDrill = len(topPrimary)
+	}
+
+	for i := 0; i < maxPrimaryToDrill; i++ {
+		top := topPrimary[i]
+		primaryExpr := getDimExpr(top.Dimension)
+
+		for _, sec := range allDims {
+			if sec.Name == top.Dimension {
+				continue
+			}
+
+			wg.Add(1)
+			go func(primarySeg SegmentContribution, pExpr string, secondaryDim, secondaryExpr string) {
+				defer wg.Done()
+				res := e.queryTwoLevelContribution(ctx, wStart, wEnd, metric, totalDelta, primarySeg, pExpr, secondaryDim, secondaryExpr)
+				if len(res) > 0 {
+					mu.Lock()
+					results = append(results, res...)
+					mu.Unlock()
+				}
+			}(top, primaryExpr, sec.Name, sec.Expr)
+		}
+	}
+
+	wg.Wait()
+	return results
+}
+
+func (e *RCAEngine) queryTwoLevelContribution(ctx context.Context, wStart, wEnd, metric string, totalDelta float64, top SegmentContribution, primaryExpr, secondaryDim, secondaryExpr string) []SegmentContribution {
 	curMetricExpr := getMetricSqlExpr(metric)
 	baseMetricExpr := getBaseMetricSqlExpr(metric)
+	safeVal := sanitize(top.Value)
 
 	query := fmt.Sprintf(`
 	WITH current_segs AS (
@@ -508,18 +575,19 @@ func (e *RCAEngine) drillDownTwoLevel(ctx context.Context, wStart, wEnd, metric 
 		FROM ad_events
 		WHERE event_time < '%s' 
 		  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
-		  AND toHour(event_time) = toHour(toDateTime('%s'))
+		  AND toHour(event_time) >= toHour(toDateTime('%s'))
+		  AND toHour(event_time) < toHour(toDateTime('%s'))
 		  AND %s = '%s'
 		GROUP BY sec_val
 	)
 	SELECT 
-		coalesce(c.sec_val, b.seg_val) AS value,
+		coalesce(c.sec_val, b.sec_val) AS value,
 		toFloat64(coalesce(c.cur_metric, 0)) AS current_m,
 		toFloat64(coalesce(b.base_metric, 0)) AS base_m
 	FROM current_segs c FULL OUTER JOIN base_segs b ON c.sec_val = b.sec_val
 	ORDER BY abs(current_m - base_m) DESC
 	LIMIT 2;
-	`, secondaryExpr, curMetricExpr, wStart, wEnd, primaryExpr, top.Value, secondaryExpr, baseMetricExpr, wStart, wStart, wStart, primaryExpr, top.Value)
+	`, secondaryExpr, curMetricExpr, wStart, wEnd, primaryExpr, safeVal, secondaryExpr, baseMetricExpr, wStart, wStart, wStart, wEnd, primaryExpr, safeVal)
 
 	rows, err := e.conn.Query(ctx, query)
 	if err != nil {
@@ -535,6 +603,10 @@ func (e *RCAEngine) drillDownTwoLevel(ctx context.Context, wStart, wEnd, metric 
 			continue
 		}
 
+		if secVal == "" {
+			secVal = "Unknown"
+		}
+
 		delta := cur - base
 		share := 0.0
 		if math.Abs(totalDelta) > 0.0001 {
@@ -546,17 +618,19 @@ func (e *RCAEngine) drillDownTwoLevel(ctx context.Context, wStart, wEnd, metric 
 			}
 		}
 
-		combinedDim := fmt.Sprintf("%s x %s", top.Dimension, secondaryDim)
-		combinedVal := fmt.Sprintf("%s x %s", top.Value, secVal)
+		if math.Abs(share) >= 0.08 {
+			combinedDim := fmt.Sprintf("%s x %s", top.Dimension, secondaryDim)
+			combinedVal := fmt.Sprintf("%s x %s", top.Value, secVal)
 
-		results = append(results, SegmentContribution{
-			Dimension:     combinedDim,
-			Value:         combinedVal,
-			CurrentMetric: math.Round(cur*100) / 100,
-			BaseMetric:    math.Round(base*100) / 100,
-			SegmentDelta:  math.Round(delta*100) / 100,
-			ShareOfDelta:  math.Round(share*1000) / 1000,
-		})
+			results = append(results, SegmentContribution{
+				Dimension:     combinedDim,
+				Value:         combinedVal,
+				CurrentMetric: math.Round(cur*100) / 100,
+				BaseMetric:    math.Round(base*100) / 100,
+				SegmentDelta:  math.Round(delta*100) / 100,
+				ShareOfDelta:  math.Round(share*1000) / 1000,
+			})
+		}
 	}
 
 	return results
