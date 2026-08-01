@@ -1,5 +1,11 @@
 import path from "path";
-import { VectorStoreIndex, SimpleDirectoryReader, Settings, DeepSeekLLM, HuggingFaceEmbedding } from "llamaindex";
+import {
+  VectorStoreIndex,
+  SimpleDirectoryReader,
+  Settings,
+  DeepSeekLLM,
+  HuggingFaceEmbedding,
+} from "llamaindex";
 
 let index: VectorStoreIndex | null = null;
 
@@ -14,7 +20,9 @@ export function isIndexInitialized(): boolean {
 export async function initializeIndex(): Promise<boolean> {
   const apiKey = process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    console.warn("WARNING: DEEPSEEK_API_KEY environment variable is not set. LlamaIndex index creation skipped until key is provided.");
+    console.warn(
+      "WARNING: DEEPSEEK_API_KEY environment variable is not set. LlamaIndex index creation skipped until key is provided.",
+    );
     return false;
   }
 
@@ -36,7 +44,9 @@ export async function initializeIndex(): Promise<boolean> {
     const reader = new SimpleDirectoryReader();
     const documents = await reader.loadData({ directoryPath: dataDir });
     index = await VectorStoreIndex.fromDocuments(documents);
-    console.log("LlamaIndex successfully initialized with DeepSeek API and vectorized documents.");
+    console.log(
+      "LlamaIndex successfully initialized with DeepSeek API and vectorized documents.",
+    );
     return true;
   } catch (error) {
     console.error("Error initializing LlamaIndex with DeepSeek API:", error);

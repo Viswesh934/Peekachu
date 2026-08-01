@@ -23,7 +23,9 @@
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
-    "llamaindex": "^0.8.27"
+    "langfuse": "^3.38.20",
+    "llamaindex": "^0.8.27",
+    "openai": "^4.104.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
