@@ -35,18 +35,20 @@ func (e *RCAEngine) FindTopAnomaly(ctx context.Context, metric string) (*Anomaly
 
 	query := fmt.Sprintf(`
 	WITH hourly AS (
-	  SELECT toStartOfHour(event_time) AS h,
-	         count() AS requests,
-	         sum(is_filled) AS fills,
-	         sum(is_impression) AS impressions,
-	         sum(is_click) AS clicks,
-	         sum(revenue) AS revenue,
+	  SELECT event_hour AS h,
+	         countMerge(requests) AS requests,
+	         sumMerge(fills) AS fills,
+	         sumMerge(impressions) AS impressions,
+	         sumMerge(clicks) AS clicks,
+	         sumMerge(revenue) AS revenue,
 	         fills / nullIf(requests, 0) AS fill_rate,
 	         impressions / nullIf(fills, 0) AS render_rate,
 	         clicks / nullIf(impressions, 0) AS ctr,
-	         revenue / nullIf(impressions, 0) * 1000 AS ecpm
-	         , revenue / nullIf(requests, 0) AS rpr
-	  FROM ad_events GROUP BY h
+	         revenue / nullIf(impressions, 0) * 1000 AS ecpm,
+	         revenue / nullIf(requests, 0) AS rpr
+	  FROM ad_events_hourly_rollup
+	  WHERE dim_name = 'ad_format'
+	  GROUP BY h
 	),
 	baseline AS (
 	  SELECT h, fill_rate, render_rate, ctr, revenue, requests, fills, impressions, clicks, ecpm, rpr,
@@ -342,77 +344,30 @@ func (e *RCAEngine) decomposeFactors(cur, base map[string]float64) *FactorDecomp
 }
 
 func (e *RCAEngine) drillDownPrimaryDimensions(ctx context.Context, wStart, wEnd, targetMetric string, totalDelta float64) ([]SegmentContribution, []string) {
-	// Single-pass GROUP BY GROUPING SETS implementation in ClickHouse for high-throughput primary dimension breakdown
-	curMetricExpr := getMetricSqlExpr(targetMetric)
-	baseMetricExpr := getBaseMetricSqlExpr(targetMetric)
+	curMetricExpr := getRollupMetricSqlExpr(targetMetric)
+	baseMetricExpr := getRollupBaseMetricSqlExpr(targetMetric)
 
 	query := fmt.Sprintf(`
 	WITH current_segs AS (
 		SELECT 
-			multiIf(ad_format != '', 'ad_format',
-			        category != '', 'category',
-			        publisher_tier != '', 'publisher_tier',
-			        vertical != '', 'vertical',
-			        campaign_type != '', 'campaign_type',
-			        region != '', 'region',
-			        country != '', 'country',
-			        device_model != '', 'device_model',
-			        'os_version') AS dim_name,
-			coalesce(nullIf(ad_format,''), nullIf(category,''), nullIf(publisher_tier,''), nullIf(vertical,''), nullIf(campaign_type,''), nullIf(region,''), nullIf(country,''), nullIf(device_model,''), nullIf(os_version,'')) AS dim_val,
+			dim_name,
+			dim_val,
 			%s AS cur_metric
-		FROM (
-			SELECT 
-				ad_format,
-				dictGet('apps_dict', 'category', app_id) AS category,
-				dictGet('apps_dict', 'publisher_tier', app_id) AS publisher_tier,
-				dictGet('advertisers_dict', 'vertical', assumeNotNull(advertiser_id)) AS vertical,
-				dictGet('advertisers_dict', 'campaign_type', assumeNotNull(advertiser_id)) AS campaign_type,
-				dictGet('geo_device_dict', 'region', geo_device_id) AS region,
-				dictGet('geo_device_dict', 'country', geo_device_id) AS country,
-				dictGet('geo_device_dict', 'device_model', geo_device_id) AS device_model,
-				dictGet('geo_device_dict', 'os_version', geo_device_id) AS os_version
-			FROM ad_events
-			WHERE event_time >= '%s' AND event_time < '%s'
-		)
-		GROUP BY GROUPING SETS (
-			(ad_format), (category), (publisher_tier), (vertical), (campaign_type),
-			(region), (country), (device_model), (os_version)
-		)
+		FROM ad_events_hourly_rollup
+		WHERE event_hour >= '%s' AND event_hour < '%s'
+		GROUP BY dim_name, dim_val
 	),
 	base_segs AS (
 		SELECT 
-			multiIf(ad_format != '', 'ad_format',
-			        category != '', 'category',
-			        publisher_tier != '', 'publisher_tier',
-			        vertical != '', 'vertical',
-			        campaign_type != '', 'campaign_type',
-			        region != '', 'region',
-			        country != '', 'country',
-			        device_model != '', 'device_model',
-			        'os_version') AS dim_name,
-			coalesce(nullIf(ad_format,''), nullIf(category,''), nullIf(publisher_tier,''), nullIf(vertical,''), nullIf(campaign_type,''), nullIf(region,''), nullIf(country,''), nullIf(device_model,''), nullIf(os_version,'')) AS dim_val,
+			dim_name,
+			dim_val,
 			%s AS base_metric
-		FROM (
-			SELECT 
-				ad_format,
-				dictGet('apps_dict', 'category', app_id) AS category,
-				dictGet('apps_dict', 'publisher_tier', app_id) AS publisher_tier,
-				dictGet('advertisers_dict', 'vertical', assumeNotNull(advertiser_id)) AS vertical,
-				dictGet('advertisers_dict', 'campaign_type', assumeNotNull(advertiser_id)) AS campaign_type,
-				dictGet('geo_device_dict', 'region', geo_device_id) AS region,
-				dictGet('geo_device_dict', 'country', geo_device_id) AS country,
-				dictGet('geo_device_dict', 'device_model', geo_device_id) AS device_model,
-				dictGet('geo_device_dict', 'os_version', geo_device_id) AS os_version
-			FROM ad_events
-			WHERE event_time < '%s' 
-			  AND toDayOfWeek(event_time) = toDayOfWeek(toDateTime('%s'))
-			  AND toHour(event_time) >= toHour(toDateTime('%s'))
-			  AND toHour(event_time) < toHour(toDateTime('%s'))
-		)
-		GROUP BY GROUPING SETS (
-			(ad_format), (category), (publisher_tier), (vertical), (campaign_type),
-			(region), (country), (device_model), (os_version)
-		)
+		FROM ad_events_hourly_rollup
+		WHERE event_hour < '%s' 
+		  AND toDayOfWeek(event_hour) = toDayOfWeek(toDateTime('%s'))
+		  AND toHour(event_hour) >= toHour(toDateTime('%s'))
+		  AND toHour(event_hour) < toHour(toDateTime('%s'))
+		GROUP BY dim_name, dim_val
 	)
 	SELECT 
 		coalesce(c.dim_name, b.dim_name) AS dim_name,
@@ -426,7 +381,7 @@ func (e *RCAEngine) drillDownPrimaryDimensions(ctx context.Context, wStart, wEnd
 
 	rows, err := e.conn.Query(ctx, query)
 	if err != nil {
-		// Fallback to bounded concurrency fan-out if GROUPING SETS query encounters issue
+		// Fallback to bounded concurrency fan-out if rollup table query encounters issue
 		return e.fallbackParallelDrillDown(ctx, wStart, wEnd, targetMetric, totalDelta)
 	}
 	defer rows.Close()
@@ -459,7 +414,7 @@ func (e *RCAEngine) drillDownPrimaryDimensions(ctx context.Context, wStart, wEnd
 			maxSharePerDim[dimName] = math.Abs(share)
 		}
 
-		if math.Abs(share) >= 0.10 {
+		if math.Abs(share) >= 0.08 {
 			results = append(results, SegmentContribution{
 				Dimension:     dimName,
 				Value:         val,
@@ -488,14 +443,14 @@ func (e *RCAEngine) fallbackParallelDrillDown(ctx context.Context, wStart, wEnd,
 		Expr string
 	}{
 		{"ad_format", "ad_format"},
-		{"category", "dictGet('apps_dict', 'category', app_id)"},
-		{"publisher_tier", "dictGet('apps_dict', 'publisher_tier', app_id)"},
-		{"vertical", "dictGet('advertisers_dict', 'vertical', assumeNotNull(advertiser_id))"},
-		{"campaign_type", "dictGet('advertisers_dict', 'campaign_type', assumeNotNull(advertiser_id))"},
-		{"region", "dictGet('geo_device_dict', 'region', geo_device_id)"},
-		{"country", "dictGet('geo_device_dict', 'country', geo_device_id)"},
-		{"device_model", "dictGet('geo_device_dict', 'device_model', geo_device_id)"},
-		{"os_version", "dictGet('geo_device_dict', 'os_version', geo_device_id)"},
+		{"category", "category"},
+		{"publisher_tier", "publisher_tier"},
+		{"vertical", "vertical"},
+		{"campaign_type", "campaign_type"},
+		{"region", "region"},
+		{"country", "country"},
+		{"device_model", "device_model"},
+		{"os_version", "os_version"},
 	}
 
 	var results []SegmentContribution
@@ -652,14 +607,14 @@ func (e *RCAEngine) drillDownTwoLevel(ctx context.Context, wStart, wEnd, metric 
 		Expr string
 	}{
 		{"ad_format", "ad_format"},
-		{"category", "dictGet('apps_dict', 'category', app_id)"},
-		{"publisher_tier", "dictGet('apps_dict', 'publisher_tier', app_id)"},
-		{"vertical", "dictGet('advertisers_dict', 'vertical', assumeNotNull(advertiser_id))"},
-		{"campaign_type", "dictGet('advertisers_dict', 'campaign_type', assumeNotNull(advertiser_id))"},
-		{"region", "dictGet('geo_device_dict', 'region', geo_device_id)"},
-		{"country", "dictGet('geo_device_dict', 'country', geo_device_id)"},
-		{"device_model", "dictGet('geo_device_dict', 'device_model', geo_device_id)"},
-		{"os_version", "dictGet('geo_device_dict', 'os_version', geo_device_id)"},
+		{"category", "category"},
+		{"publisher_tier", "publisher_tier"},
+		{"vertical", "vertical"},
+		{"campaign_type", "campaign_type"},
+		{"region", "region"},
+		{"country", "country"},
+		{"device_model", "device_model"},
+		{"os_version", "os_version"},
 	}
 
 	var results []SegmentContribution
@@ -839,25 +794,45 @@ func getVal(m map[string]float64, k string) float64 {
 
 func getDimExpr(dim string) string {
 	switch dim {
-	case "ad_format":
-		return "ad_format"
-	case "category":
-		return "dictGet('apps_dict', 'category', app_id)"
-	case "publisher_tier":
-		return "dictGet('apps_dict', 'publisher_tier', app_id)"
-	case "vertical":
-		return "dictGet('advertisers_dict', 'vertical', assumeNotNull(advertiser_id))"
-	case "campaign_type":
-		return "dictGet('advertisers_dict', 'campaign_type', assumeNotNull(advertiser_id))"
-	case "region":
-		return "dictGet('geo_device_dict', 'region', geo_device_id)"
-	case "country":
-		return "dictGet('geo_device_dict', 'country', geo_device_id)"
-	case "device_model":
-		return "dictGet('geo_device_dict', 'device_model', geo_device_id)"
-	case "os_version":
-		return "dictGet('geo_device_dict', 'os_version', geo_device_id)"
+	case "ad_format", "category", "publisher_tier", "vertical", "campaign_type", "region", "country", "device_model", "os_version":
+		return dim
 	default:
 		return dim
 	}
 }
+
+func getRollupMetricSqlExpr(metric string) string {
+	switch metric {
+	case "requests":
+		return "countMerge(requests)"
+	case "fills":
+		return "sumMerge(fills)"
+	case "impressions":
+		return "sumMerge(impressions)"
+	case "clicks":
+		return "sumMerge(clicks)"
+	case "revenue":
+		return "sumMerge(revenue)"
+	case "fill_rate":
+		return "sumMerge(fills) / nullIf(countMerge(requests), 0)"
+	case "render_rate":
+		return "sumMerge(impressions) / nullIf(sumMerge(fills), 0)"
+	case "ctr":
+		return "sumMerge(clicks) / nullIf(sumMerge(impressions), 0)"
+	case "ecpm":
+		return "sumMerge(revenue) / nullIf(sumMerge(impressions), 0) * 1000.0"
+	case "rpr":
+		return "sumMerge(revenue) / nullIf(countMerge(requests), 0)"
+	default:
+		return "sumMerge(revenue)"
+	}
+}
+
+func getRollupBaseMetricSqlExpr(metric string) string {
+	expr := getRollupMetricSqlExpr(metric)
+	if metric == "fill_rate" || metric == "ecpm" || metric == "render_rate" || metric == "ctr" || metric == "rpr" {
+		return expr
+	}
+	return fmt.Sprintf("(%s) / nullIf(uniqExact(toDate(event_hour)), 0)", expr)
+}
+
