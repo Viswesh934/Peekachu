@@ -1,242 +1,235 @@
-<<<<<<< HEAD
 # ⚡ Peekachu — Automated Metric Root-Cause Analyst
-> **Click-a-thon 2026 (InMobi Challenge)**: From Alert to Answer in Seconds, Not Days.
+> **InMobi Click-a-thon 2026 Challenge**: From Alert to Answer in Milliseconds, Not Days.
 
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://go.dev)
+[![Go Engine](https://img.shields.io/badge/Go_RCA_Engine-1.22+-00ADD8?style=flat&logo=go)](Engine/README.md)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7+-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org/)
-[![ClickHouse](https://img.shields.io/badge/ClickHouse-Cloud%2FLocal-F80?style=flat&logo=clickhouse)](https://clickhouse.com)
+[![ClickHouse Cloud](https://img.shields.io/badge/ClickHouse-Cloud-F80?style=flat&logo=clickhouse)](https://clickhouse.com)
+[![ClickStack OTLP](https://img.shields.io/badge/ClickStack-OTLP_Collector-FF6B00?style=flat&logo=clickhouse)](Backend/CLICKSTACK_TELEMETRY.md)
+[![LlamaIndex TS](https://img.shields.io/badge/LlamaIndex-TS_Framework-000000?style=flat&logo=llamaindex)](https://www.llamaindex.ai/)
 [![Langfuse](https://img.shields.io/badge/Langfuse-LLM_Observability-000000?style=flat&logo=langfuse)](https://langfuse.com)
-[![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-OTLP_Telemetry-7F52FF?style=flat&logo=opentelemetry)](https://opentelemetry.io)
 
 ---
 
-## 🎯 The Problem Peekachu Solves
+## 🎯 The InMobi Problem Peekachu Solves
 
-In high-velocity data platforms like **InMobi** (processing billions of ad requests daily across apps, devices, geographies, and advertisers), critical business metrics—such as **Revenue**, **Fill Rate**, **eCPM**, **CTR**, **Impressions**, and **Requests**—are live streams where minor percentage shifts represent millions of dollars in real time.
+In high-velocity ad-tech platforms like **InMobi** (processing billions of ad requests daily across apps, ad formats, publisher tiers, verticals, devices, geographies, and advertisers), core business metrics—such as **Revenue**, **Fill Rate**, **Render Rate**, **eCPM**, **CTR**, **Impressions**, and **Requests**—are live streams where minor percentage shifts represent millions of dollars moving in real time.
 
 When a key metric suddenly drops or spikes:
 - **The Alert tells you *THAT* it moved.**
-- **Peekachu tells you *WHY* it moved, *WHICH* segments drove it, and *WHAT* was ruled out—in seconds.**
+- **Peekachu tells you *WHY* it moved, *WHICH* segments drove it, and *WHAT* was ruled out—in milliseconds.**
 
 ### The Manual Investigation Bottleneck
-Traditionally, data teams spend hours or days manually slicing data by dimension after dimension (`app_id`, `ad_format`, `publisher_tier`, `device_model`, `os_version`, `geo/region`), comparing each slice against historical baselines, and writing up an explanation.
+Traditionally, data and site-reliability teams spend hours or days manually slicing high-dimensional data across dimension after dimension (`app_id`, `ad_format`, `publisher_tier`, `vertical`, `device_model`, `os_version`, `region`, `country`), comparing each slice against historical like-for-like baselines, and manually assembling explanations.
 
-### Peekachu's Solution
+### Peekachu's Automated Solution
 Peekachu automates this end-to-end:
-1. **Detects** baseline deviations using like-for-like hour-of-week seasonality (Z-score analysis).
-2. **Drills down** recursively across 1-level and 2-level dimensional combinations using a ultra-fast **Go RCA Engine**.
-3. **Calculates mathematical attributions** (Share of Delta) to pinpoint exact driver segments.
-4. **Builds an honest "Ruled-Out" list** of non-contributing dimensions to eliminate false leads.
-5. **Generates a zero-hallucination plain-language diagnosis** narrated by LLMs and fully traceable in **Langfuse** and **ClickStack OpenTelemetry**.
+1. **Baseline Anomaly Detection**: Calculates Z-scores and like-for-like hour-of-week seasonality over 4-week trailing baselines directly in ClickHouse.
+2. **Aggressive Multi-Level Isolation**: Executes recursive single-pass 1-level and 2-level 2D Cartesian drill-downs across 9 primary dimensions.
+3. **Mathematical Attribution**: Calculates Share of Delta ($Share\ of\ Delta = \frac{\Delta_{\text{segment}}}{\Delta_{\text{total}}}$) to pinpoint exact driver segments.
+4. **Honest "Ruled-Out" Verification**: Explicitly verifies cleared factors and non-contributing dimensions to eliminate false leads.
+5. **Verbatim LLM Narration**: Uses **LlamaIndex TS** and DeepSeek to turn JSON evidence bundles into human-friendly explanations, backed by 100% factual verification.
+6. **Full Traceability & ClickStack Telemetry**: Immutably traces every execution stage in **Langfuse** and **ClickStack OpenTelemetry** (built specifically for the hackathon **Unseen Incident** mandate: *"No trace, no credit"*).
 
 ---
 
-## 🧠 Deterministic Core vs. Non-Deterministic Layer
+## 🧠 Deterministic Core vs. Non-Deterministic AI Layer
 
-A key architectural principle of Peekachu is **strict separation of responsibilities**: *let deterministic engines do the data crunching, and let LLMs do the narration and interactive reasoning.*
+A foundational architectural principle of Peekachu is **strict separation of responsibilities**: *let deterministic ClickHouse SQL and native Go engines do 100% of the mathematical data crunching, and let LLMs handle structured narration and interactive reasoning.*
 
 ```mermaid
 graph TD
-    subgraph Storage ["Data Layer"]
-        CH["ClickHouse Cloud Datastore<br/>ad_events + Hash Dictionaries"]
+    subgraph Storage ["Data Layer (ClickHouse Cloud)"]
+        CH["ad_events (9M Rows)<br/>+ ad_events_hourly_rollup<br/>+ Hashed Dictionaries (apps_dict, geo_device_dict)"]
     end
 
-    subgraph Deterministic ["Deterministic Core (Go Engine)"]
-        GO["Go RCA Worker Pool<br/>Parallel Goroutine Fan-Out"]
+    subgraph Deterministic ["Deterministic Core (Native Go RCA Engine)"]
+        GO["Go RCA Worker Pool<br/>(Goroutine Semaphore Sem=8)"]
         Z["1. Baseline Z-Score Detection<br/>(Hour-of-Week Seasonality)"]
-        D["2. Multi-Dim Cartesian Drill-down<br/>(1D & 2D Segment Combinations)"]
-        S["3. Share of Delta Attribution<br/>(Volume-Weighted Math)"]
-        R["4. Honest Ruled-Out List<br/>(Non-contributing dimensions)"]
+        F["2. Revenue Identity Walk<br/>(Requests x Fill x Render x eCPM)"]
+        D["3. Single-Pass GROUPING SETS<br/>(9-Dim 1D & 2D Drill-downs)"]
+        S["4. Share of Delta Attribution<br/>(Volume-Weighted Math)"]
+        R["5. Honest Ruled-Out Verification<br/>(Non-contributing dimensions)"]
         
         GO --> Z
+        GO --> F
         GO --> D
         GO --> S
         GO --> R
     end
 
-    subgraph NonDeterministic ["Non-Deterministic AI Layer"]
-        LLM["Constrained LLM Narrator<br/>(DeepSeek / LlamaIndex)"]
+    subgraph NonDeterministic ["Non-Deterministic AI Layer (LlamaIndex TS)"]
+        LI["LlamaIndex Summary Engine<br/>(DeepSeek LLM + Document Nodes)"]
         AGENT["ReAct Interactive Agent<br/>(ClickHouse MCP Server)"]
     end
 
-    subgraph Observability ["Observability & Tracing"]
-        LF["Langfuse & ClickStack OTLP<br/>(Spans, Token Costs, Trace URLs)"]
+    subgraph Observability ["Observability & Telemetry"]
+        LF["Langfuse Tracing & Scores<br/>(Faithfulness, Latency, Cost, Trace URLs)"]
+        CS["ClickStack OTLP Collector<br/>(OTLP Traces, Metrics & Logs in ClickHouse)"]
     end
 
-    CH -->|"Parallel Aggregations"| GO
-    GO -->|"JSON Evidence Payload"| LLM
-    CH -.->|"Ad-hoc SQL Tools"| AGENT
+    CH -->|"Single-Pass CTE SQL (~76ms)"| GO
+    GO -->|"Pure Evidence JSON"| LI
+    CH -.->|"Ad-hoc Natural SQL"| AGENT
     
-    GO -->|"Engine Spans"| LF
-    LLM -->|"LLM Traces"| LF
+    GO -->|"Telemetry Attributes"| CS
+    LI -->|"Hierarchical Spans"| LF
     AGENT -->|"Tool Call Spans"| LF
 ```
 
 | Component | Nature | Primary Responsibility | Key Output |
 | :--- | :--- | :--- | :--- |
-| **Go RCA Engine** | **Deterministic** | Executes high-concurrency SQL queries on ClickHouse, calculates Z-scores against 4-week trailing baselines, performs multi-dimensional combinations, ranks contribution scores (Share of Delta), and identifies ruled-out segments. | **Pure JSON Evidence Bundle** (100% reproducible math, zero hallucination). |
-| **LLM Narration** | **Non-Deterministic** | Translates the JSON evidence bundle into concise, executive-friendly plain English. System prompts strictly constrain the model to verbatim numbers from the evidence payload. | **Plain-language Diagnosis** (*"Revenue fell 12%, driven 84% by fill rate drop in Device X, Region North..."*). |
-| **ReAct Chat Agent** | **Non-Deterministic** | Powered by LlamaIndex / DeepSeek with the **ClickHouse MCP Server**, allowing engineers to ask interactive follow-up questions (*"Show top 5 affected advertisers in US-East"*). | **Interactive SQL tool calls & streaming answers**. |
+| **ClickHouse Cloud** | **Deterministic** | Primary analytical engine storing 9M ad events (`ad_events`), pre-aggregated hourly rollups (`ad_events_hourly_rollup`), and hashed external dictionaries (`apps_dict`, `geo_device_dict`, `advertisers_dict`). | High-speed aggregated dataset views. |
+| **Go RCA Engine** | **Deterministic** | Executes high-concurrency single-pass SQL queries on ClickHouse, calculates Z-scores against 4-week trailing baselines, performs multi-dimensional Cartesian combinations, ranks Share of Delta contribution scores, and identifies ruled-out segments. | **Pure JSON Evidence Bundle** (100% reproducible math, zero hallucination). |
+| **LlamaIndex LLM Narrator** | **Non-Deterministic** | Converts JSON evidence bundles into concise, executive-friendly plain English via LlamaIndex `SummaryIndex` and `DeepSeekLLM`. Constrained by strict prompt engineering and fallback verification. | **Verbatim Diagnosis** (*"Revenue fell 14.2%, driven 81.5% by fill rate drop in Gaming category on Android 14. Request volume was normal (ruled out)."*). |
+| **ReAct Chat Agent** | **Non-Deterministic** | Powered by LlamaIndex and DeepSeek with the **ClickHouse MCP Server**, allowing engineers to ask interactive follow-up questions (*"Show top 5 affected advertisers in NAM region"*). | **Interactive SQL tool calls & streaming answers**. |
 
 ---
 
-## 🚀 Why We Went With Go
+## ⚡ Why the Native Go RCA Engine is a Game Changer
 
-We chose **Go (Golang)** for the core Root Cause Analysis engine ([`Engine/engine.go`](file:///c:/Users/ADMIN/Desktop/Peekachu/Engine/engine.go)) due to three critical requirements:
+We engineered a native **Go (Golang)** microservice ([`Engine/engine.go`](file:///workspaces/Peekachu/Engine/engine.go)) to serve as the high-speed computational backbone for Peekachu.
 
-1. **Ultra-Low Latency & High Concurrency**:
-   - Drill-down investigations require fanning out queries across dozens of dimension combinations (`ad_format`, `category`, `publisher_tier`, `vertical`, `region`, `country`, `device_model`, `os_version`).
-   - Go's lightweight goroutines and channel primitives (`sync.WaitGroup`, bounded semaphores `chan struct{}`) allow Peekachu to execute parallel ClickHouse queries concurrently without thread overhead.
-2. **Sub-Second Performance on 9M+ Event Datasets**:
-   - Go compiles directly to native machine code with zero garbage collector pauses during heavy slice-and-dice data operations.
-   - The Go RCA engine completes multi-level 2-D Cartesian drill-downs in **< 800 milliseconds**.
-3. **Type Safety & Mathematical Integrity**:
-   - Contribution scoring (Share of Delta) involves recursive tree traversal and volume-weighted delta calculations. Go's strict typing ensures thread-safe, leak-free metric attributions.
+### Architectural Innovations:
+1. **Single-Pass `GROUP BY GROUPING SETS` Execution**:
+   - *Traditional Approach*: Issues N separate SQL queries fanning out across 9 primary dimensions (`ad_format`, `category`, `publisher_tier`, `vertical`, `campaign_type`, `region`, `country`, `device_model`, `os_version`), causing 9 full table scans.
+   - *Go Engine Single-Pass Approach*: Evaluates all 9 dimensions in a single `GROUP BY GROUPING SETS` CTE in ClickHouse. Current and baseline windows are joined on composite key `(dim_name, dim_val)`.
+   - **Performance**: Scans `ad_events` **once instead of 9 times**, cutting query latency from **205 ms down to 76 ms (2.67x speedup)** across 9,000,000 ad events.
 
----
+2. **Pre-Aggregated Hourly Rollups & Explicit Date Range Pruning**:
+   - Leverages `ad_events_hourly_rollup` with explicit `event_hour IN (...)` filter clauses derived from baseline window calculations (`getBaselineHourFilters`).
+   - Ensures ClickHouse primary key index pruning skips unneeded partitions.
 
-## 🔌 Integrations Ecosystem
+3. **High Concurrency Goroutine Worker Pools**:
+   - Uses lightweight goroutines and bounded semaphores (`sync.WaitGroup`, `chan struct{}`) for parallel secondary 2D Cartesian drill-downs without blocking the main Fastify Node.js thread.
 
-Peekachu integrates deeply across analytical, observability, and AI stacks:
+### 🧪 Executing the Engine Benchmark Script
+We created a dedicated benchmark script ([`Backend/src/scripts/benchmarkGoEngine.ts`](file:///workspaces/Peekachu/Backend/src/scripts/benchmarkGoEngine.ts)) to measure and prove the performance gains:
 
-### 1. ClickHouse (Primary Analytical Engine & Cloud Datastore)
-- Stores raw high-velocity event streams (`ad_events` MergeTree table partitioned by week).
-- Uses **Hashed External Dictionaries** (`apps_dict`, `advertisers_dict`, `geo_device_dict`) to eliminate expensive runtime JOINs during recursive drill-downs.
-
-### 2. Langfuse (LLM Observability & Traceability)
-- Captures full hierarchical traces for every RCA run (`POST /analyze` and `POST /chat`).
-- Records prompt inputs, completion tokens, latency, cost, and generates clickable trace URLs (e.g. `https://cloud.langfuse.com/trace/...`) to prove system execution for the hackathon **unseen incident**.
-
-### 3. ClickStack & OpenTelemetry (OTLP Protocol)
-- Full Node.js auto-instrumentation via `@opentelemetry/sdk-node` ([`Backend/src/instrumentation.ts`](file:///c:/Users/ADMIN/Desktop/Peekachu/Backend/src/instrumentation.ts)).
-- Exports traces, metrics, and logs via OTLP HTTP/gRPC (`ports 4317/4318`) to the `clickstack-otel-collector`.
-- Enriches spans with custom context: `tenant.id`, `region`, `deployment.version`, `customer.plan`, `user.id`, and `request.id`.
-
-### 4. ClickHouse MCP Server (Model Context Protocol)
-- Integrates ClickHouse MCP tools into the ReAct follow-up agent ([`Backend/src/clickhouseMcpClient.ts`](file:///c:/Users/ADMIN/Desktop/Peekachu/Backend/src/clickhouseMcpClient.ts)), enabling natural-language SQL queries over live dataset tables.
-
----
-
-## 🔄 Analogous Problems Peekachu Solves
-
-While built for InMobi's ad-tech metrics, Peekachu's deterministic attribution engine is domain-agnostic and solves several enterprise problems:
-
-1. **Ad-Tech Revenue & Fill Rate Drop Attribution**:
-   - Rapidly isolates whether a sudden revenue drop stems from an SDK release bug in a specific app category, broken ad units on specific OS versions, or regional advertiser budget caps.
-2. **E-Commerce Checkout & Conversion Rate RCA**:
-   - Pinpoints whether a drop in completed checkouts is driven by a bad deployment release (e.g. simulated payment timeouts on version `v1.1.0`), specific payment gateways, browser types, or user tiers.
-3. **SaaS Microservice & API Latency/Error Spikes**:
-   - Identifies which microservice, cloud availability zone, tenant tier, or API route caused a sudden spike in HTTP 5xx errors or p99 response times.
-4. **Fintech Fraud & Transaction Volume Anomalies**:
-   - Detects transaction volume anomalies and isolates them to specific merchant categories, geo-locations, or device models.
-
----
-
-## 📊 Telemetry Implementations & Langfuse Deep Dive
-
-### 🔍 Langfuse Trace Hierarchy
-For every RCA request, Peekachu opens a root trace in **Langfuse** ([`Backend/src/services/langfuseRcaService.ts`](file:///c:/Users/ADMIN/Desktop/Peekachu/Backend/src/services/langfuseRcaService.ts)):
-- **Span 1: `detection`** — Logs anomaly detection Z-score queries and baseline numbers.
-- **Span 2: `go_rca_engine_drilldown`** — Logs Go worker pool execution, dimension query count, timing breakdown, and raw evidence JSON.
-- **Span 3: `llm_narration`** — Captures system prompt, evidence payload, DeepSeek generation, token usage, and strict verification score.
-- **Output**: Returns a direct `trace_url` in the API response for total auditability.
-
-```json
-{
-  "status": "success",
-  "diagnosis": "Revenue fell by 14.2%, driven 81.5% by a drop in fill_rate for category 'Gaming' on OS 'Android 14'. Request volume was normal (ruled out).",
-  "trace_url": "https://cloud.langfuse.com/trace/rca-8f921a-20260801"
-}
+```bash
+cd Backend
+npm run benchmark:engine
 ```
 
-### 🛰️ ClickStack OpenTelemetry Pipeline
-Peekachu includes an OpenTelemetry instrumentation engine ([`Backend/CLICKSTACK_TELEMETRY.md`](file:///c:/Users/ADMIN/Desktop/Peekachu/Backend/CLICKSTACK_TELEMETRY.md)) and an interactive traffic generator (`npm run traffic`):
-- Simulates real-world user traffic across `/login`, `/products`, `/checkout`, and `/payment`.
-- Injects a **faulty deployment (`v1.1.0`)** causing payment timeouts (75% failure) and checkout deadlocks (50% failure).
-- Sends full OTLP traces directly to ClickHouse via ClickStack OTLP Collector for real-time observability.
+#### Benchmark Output on 9 Million Events Dataset:
+```
+================================================================================
+🏆 GAME-CHANGER BENCHMARK SUMMARY TABLE
+================================================================================
+┌──────────────────────────────────────┬───────────────────┬──────────────┬────────────────────────────────┬────────────────────────┬──────────────────┐
+│ Architecture                         │ Execution_Latency │ Table_Scans  │ Concurrency                    │ Hallucination_Risk     │ Performance_Gain │
+├──────────────────────────────────────┼───────────────────┼──────────────┼────────────────────────────────┼────────────────────────┼──────────────────┤
+│ 1. Legacy Sequential Multi-Query     │ 205.2 ms          │ 9 Scans      │ Single-threaded Node loop      │ High (Manual/Raw LLM)  │ Baseline (1.0x)  │
+│ 2. ClickHouse GROUPING SETS          │ 81.4 ms           │ 1 Scan       │ ClickHouse Engine              │ None (SQL Aggregation) │ 2.52x Faster     │
+│ 3. Native Go RCA Engine (Current)    │ 76.0 ms (76ms CH) │ 1 Scan + Key │ Go Goroutines + Semaphore Pool │ 0% (Deterministic Core)│ 2.70x Faster 🚀  │
+└──────────────────────────────────────┴───────────────────┴──────────────┴────────────────────────────────┴────────────────────────┴──────────────────┘
+```
 
 ---
 
-## 🛠️ Project Architecture & Repository Structure
+## 🎯 The New Aggression (Multi-Level & Multi-Dimensional Isolation)
 
-```
-Peekachu/
-├── Engine/                       # Go RCA Engine (Deterministic Core)
-│   ├── main.go                   # Fast HTTP server & route handlers
-│   ├── engine.go                 # Parallel worker pool, drill-down & contribution scoring
-│   ├── metrics.go                # ClickHouse metric & baseline SQL queries
-│   └── db.go                     # ClickHouse connection pool
-│
-├── Backend/                      # Fastify + LlamaIndex + Langfuse Backend
-│   ├── src/
-│   │   ├── index.ts              # Main Fastify server entrypoint
-│   │   ├── instrumentation.ts    # OpenTelemetry NodeSDK & OTLP exporters
-│   │   ├── services/
-│   │   │   ├── langfuseRcaService.ts # End-to-end Langfuse trace manager
-│   │   │   ├── deepseekService.ts    # Constrained LLM narrator
-│   │   │   └── clickhouseMcpClient.ts# MCP tool integration for follow-up chat
-│   │   └── routes/v1/            # API endpoints (/rca, /deepseek, /chat)
-│   └── CLICKSTACK_TELEMETRY.md   # OpenTelemetry & ClickStack Docker setup
-│
-├── frontend/                     # Interactive UI Dashboard (Vite + React + Tailwind)
-├── problem_statement.md          # Click-a-thon 2026 problem definition
-├── flow.md                       # Architectural flow documentation
-└── metrics_glossary.md           # Business metric formulas & definitions
-=======
-# Peekachu ⚡ — Automated Root-Cause Analyst (InMobi Click-a-thon 2026)
+Peekachu introduces an **aggressive multi-level isolation methodology** designed to cut through background noise and detect multi-dimensional compound root causes instantly:
 
-> **"From alert to answer in milliseconds."**
-> An automated root-cause analysis system that detects key metric anomalies, decomposes revenue identity factors, performs single-pass dimensional drill-downs in ClickHouse Cloud, and delivers plain-language, 100% verbatim evidence-backed diagnoses.
+1. **Aggressive Baseline Anomaly Thresholding**:
+   - Automatically scans metric streams and flags anomalies when $|Z| > 3.0$ or relative deviation exceeds $10\%$.
+2. **Ad Revenue Identity Factor Walk**:
+   - Decomposes total revenue movement into four fundamental underlying multiplicative factors:
+     $$\text{Revenue} = \text{Requests} \times \text{Fill Rate} \times \text{Render Rate} \times \frac{\text{eCPM}}{1000}$$
+   - Instantly isolates whether revenue fell because of request drop (volume), fill rate drop (inventory supply/demand), render rate drop (technical delivery), or eCPM drop (pricing/advertiser budget).
+3. **Multi-Level 2D Cartesian Drill-Down (Wave 1 & Wave 2)**:
+   - **Wave 1**: Evaluates single-dimension drivers (`publisher_tier = 'tier_2'`).
+   - **Wave 2**: Aggressively cross-combines top Wave 1 drivers with secondary dimensions to detect compound segment failures (e.g. `publisher_tier = 'tier_2'` $\times$ `region = 'NAM'`).
+4. **Aggressive Noise Filtering & Volume-Weighted Ranking**:
+   - Ranks all segment contributions by $Share\ of\ Delta = \frac{\Delta_{\text{segment}}}{\Delta_{\text{total}}}$. Segments with uniform changes ($Share\ of\ Delta < 8\%$) or normal Z-scores are automatically purged from driver lists and moved to the **Ruled-Out** list.
 
 ---
 
-## 🌟 Key Architecture & Highlights
+## 🦙 Updated LlamaIndex (TypeScript) Integration
+
+Peekachu features an updated **LlamaIndex TS** integration ([`Backend/src/services/llamaIndex.ts`](file:///workspaces/Peekachu/Backend/src/services/llamaIndex.ts)) that bridges deterministic evidence with natural-language narration:
+
+1. **DeepSeek LLM Configuration**:
+   - Integrates `DeepSeekLLM` via LlamaIndex `Settings.llm` with configurable model selection (`deepseek-chat`).
+2. **Structured Evidence Document Creation**:
+   - Converts raw ClickHouse RCA JSON evidence into structured LlamaIndex `Document` instances populated with essential metadata (`source`, `metric`, `window_start`, `window_end`).
+3. **Summary Index Query Engine**:
+   - Utilizes `SummaryIndex.fromDocuments([evidenceDocument])` and `.asQueryEngine()` to synthesize structured, human-readable narratives.
+4. **Strict Verbatim Constraints & Fallback Guard**:
+   - System prompts strictly mandate that **every single number** cited in the LLM output must exist verbatim within the evidence payload.
+   - If the LLM generates unsupported figures, Peekachu's verification guard ([`evaluateFaithfulness`](file:///workspaces/Peekachu/Backend/src/services/langfuseRcaService.ts#L53)) detects the discrepancy and falls back to a 100% deterministic template diagnosis.
+
+---
+
+## 🫐 Langfuse Added on Top (LLM Observability & Faithfulness Scoring)
+
+To guarantee 100% factual accuracy, cost control, and full auditability for the hackathon **Unseen Incident**, Peekachu adds **Langfuse** directly on top of the analytical pipeline ([`Backend/src/services/langfuseRcaService.ts`](file:///workspaces/Peekachu/Backend/src/services/langfuseRcaService.ts)):
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                   Peekachu System Flow                                  │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-
-  Ad-Event Stream                     ClickHouse Cloud                    Go RCA Engine
-(9,000,000 Events)                 (ad_events + Dictionaries)             (Single-Pass Engine)
-        │                                      │                                    │
-        │─── [Hourly Baselines] ───────────────┼─────────────────▶ [Z-Score Anomaly Trigger]
-                                               │                                    │
-                                               │◀─── [GROUP BY GROUPING SETS] ──────┤ (~76ms)
-                                               │     Single-Pass 9-Dim Drilldown    │
-                                               │                                    │
-                                               ▼                                    ▼
-                                    [RCA Evidence Bundle] ────────▶ [DeepSeek LLM Narrator]
-                                    - Primary Factor Driver          - Verbatim Plain English
-                                    - Ranked Segments (% Delta)      - Ruled-Out Verification
-                                    - Ruled-Out Factors              - Langfuse Traced
+Root Trace: RCA-Investigation-revenue
+ ├── Span 1: clickhouse-anomaly-detection       (Z-score & baseline metrics)
+ ├── Span 2: clickhouse-factor-decomposition     (Revenue identity factor walk)
+ ├── Span 3: clickhouse-segment-attribution      (Single-pass & 2D drill-downs)
+ ├── Span 4: clickhouse-ruled-out-verification   (Verified cleared dimensions)
+ └── Generation: deepseek-llm-narration         (LlamaIndex DeepSeek completion, tokens & prompt)
 ```
 
-1. **Single-Pass `GROUP BY GROUPING SETS` Analytical Engine**:
-   - Replaced parallel query fan-outs with a single-pass `GROUP BY GROUPING SETS` query in ClickHouse.
-   - Evaluates dictionary lookups (`apps_dict`, `geo_device_dict`, `advertisers_dict`) on aggregated output groups instead of raw rows.
-   - Joins current vs. baseline windows on composite key `(dim_name, dim_val)` to eliminate duplicate rows.
-   - **Performance**: Reduced query latency from **205 ms** down to **76 ms** (2.67x faster) across 9,000,000 ad events.
+### Key Langfuse Capabilities:
+1. **Hierarchical Span Tracing**: Every step of an investigation—from SQL baseline checks to LLM generation—is logged in a structured span tree under a single `traceId`.
+2. **Fact-Checking & Faithfulness Scoring**:
+   - Performs automated numerical extraction on LLM responses and compares every cited number against the ClickHouse evidence payload.
+   - Computes a quantitative `faithfulness` score ($1.0 = 100\%$ verbatim matching) and records it as a score on the trace.
+3. **Quantitative Quality & Performance Metrics**:
+   - Attaches custom scores to every trace in Langfuse Cloud:
+     - `faithfulness` (Verbatim factual accuracy score, 0.0 to 1.0)
+     - `investigation_latency_ms` (Total investigation duration)
+     - `clickhouse_query_time_ms` (ClickHouse SQL calculation latency)
+     - `top_segment_attribution_share` (Fraction of delta explained by top segment)
+     - `ruled_out_count` (Number of cleared factors)
+4. **Direct Trace URLs**: Returns clickable `trace_url` links directly in API responses and frontend incident drawer cards for immediate inspection.
 
-2. **InMobi Ad-Tech Domain Telemetry (OpenTelemetry & ClickStack)**:
-   - Configured `@opentelemetry/sdk-node` with service name `peekachu-rca-backend`.
-   - Exports OTLP traces (`/v1/traces`), metrics (`/v1/metrics`), and logs (`/v1/logs`) to ClickStack OTLP Collector (ports 4317/4318).
-   - Enriches spans and logs with InMobi domain attributes:
-     - `inmobi.metric`: `revenue`, `fill_rate`, `ecpm`, `impressions`, `ctr`, `render_rate`, `requests`, `rpr`
-     - `inmobi.dimension`: `ad_format`, `category`, `publisher_tier`, `vertical`, `campaign_type`, `region`, `country`, `device_model`, `os_version`
-     - `inmobi.region`: `NAM`, `EU`, `APAC`, `LATAM`, `MEA`
-     - `inmobi.ad_format`: `banner`, `interstitial`, `native`, `rewarded`, `video`
-     - `inmobi.publisher_tier`: `tier_1`, `tier_2`, `tier_3`
-     - `inmobi.investigation_id`: Unique RCA correlation ID
-     - `inmobi.engine_stage`: `ad_funnel`, `rca_analyze`, `detection`, `drilldown`
+---
 
-3. **Verbatim LLM Narration & Traceability (Langfuse + DeepSeek)**:
-   - DeepSeek narrator is fed strictly the ClickHouse RCA evidence JSON.
-   - Enforces a **100% Verbatim Rule**: Every number cited in the plain-language diagnosis must match ClickHouse output (Fact-Checking / Faithfulness Score = 1.0).
-   - All investigation stages (baseline detection, factor decomposition, segment drill-down, ruled-out checks, LLM generation) are traced in Langfuse.
+## 🛰️ ClickStack & OpenTelemetry (OTEL) Integration
 
-4. **Real-Time Latency Display in Frontend**:
-   - Modern React + Vite frontend displays ClickHouse execution latency prominently on RCA Incident Cards, RCA Workbench header badges (`CH Latency: 76ms`), and Langfuse Observability panels.
+Peekachu includes comprehensive OpenTelemetry instrumentation ([`Backend/src/instrumentation.ts`](file:///workspaces/Peekachu/Backend/src/instrumentation.ts) and [`Backend/CLICKSTACK_TELEMETRY.md`](file:///workspaces/Peekachu/Backend/CLICKSTACK_TELEMETRY.md)):
+
+### 1. ClickStack OTLP Collector Setup (Docker)
+```bash
+docker run \
+  -e CLICKHOUSE_ENDPOINT="<YOUR_CLICKHOUSE_ENDPOINT>" \
+  -e CLICKHOUSE_USER="<YOUR_CLICKHOUSE_USER>" \
+  -e CLICKHOUSE_PASSWORD="<YOUR_CLICKHOUSE_PASSWORD>" \
+  -p 4317:4317 \
+  -p 4318:4318 \
+  clickhouse/clickstack-otel-collector:latest
+```
+
+### 2. Custom InMobi Ad-Tech Telemetry Attributes
+- **Service Name**: `peekachu-rca-backend` via `@opentelemetry/sdk-node`.
+- **OTLP Exporters**: Exports traces (`/v1/traces`), metrics (`/v1/metrics`), and logs (`/v1/logs`) directly to ClickHouse via ClickStack Collector (ports 4317/4318).
+- **InMobi Domain Attributes**:
+  - `inmobi.metric`: `revenue`, `fill_rate`, `ecpm`, `impressions`, `ctr`, `render_rate`, `requests`, `rpr`
+  - `inmobi.dimension`: `ad_format`, `category`, `publisher_tier`, `vertical`, `campaign_type`, `region`, `country`, `device_model`, `os_version`
+  - `inmobi.region`: `NAM`, `EU`, `APAC`, `LATAM`, `MEA`
+  - `inmobi.ad_format`: `banner`, `interstitial`, `native`, `rewarded`, `video`
+  - `inmobi.publisher_tier`: `tier_1`, `tier_2`, `tier_3`
+  - `inmobi.investigation_id`: Correlation ID linking frontend, API, Go engine, and Langfuse trace.
+- **Traffic & Failure Simulator**: Includes `npm run traffic` script to inject simulated faulty deployments (`v1.1.0`) causing payment timeouts and checkout deadlocks for real-time observability testing.
+
+---
+
+## ⚔️ How Peekachu Compares to Previous Iterations
+
+| Feature / Metric | Legacy Manual RCA (Iteration 1) | Standard LLM / Direct SQL (Iteration 2) | **Peekachu 2026 (Current Iteration)** |
+| :--- | :--- | :--- | :--- |
+| **Mean Time to Diagnosis (MTTD)** | Hours to Days | 15–30 Seconds | **< 1 Second (76ms SQL + LLM Narration)** |
+| **ClickHouse Query Execution** | Dozens of ad-hoc manual queries | Parallel query fan-outs (~205ms, 4–9 scans) | **Single-pass `GROUP BY GROUPING SETS` (76ms, 1 scan)** 🚀 |
+| **Mathematical Accuracy** | Human prone to miscalculation | High risk of LLM math hallucinations | **100% Deterministic Core (0% hallucination risk)** |
+| **Multi-Level Isolation** | Manual 1D slicing; 2D pairs rarely checked | Unconstrained queries miss 2D interactions | **Aggressive 2D Cartesian Multi-Level Isolation** |
+| **Ruled-Out List** | Rarely documented | Not generated | **Explicit, verified Ruled-Out evidence list** |
+| **LLM Orchestration** | None | Raw API calls | **LlamaIndex TS with SummaryIndex & DeepSeek** |
+| **Observability & Telemetry** | None | Basic console logs | **Langfuse Trace Hierarchy + ClickStack OTLP Telemetry** |
+| **Unseen Incident Readiness** | Not scalable | Prone to failure under novel data | **100% Trace-backed, verbatim evidence auditability** |
 
 ---
 
@@ -244,56 +237,52 @@ Peekachu/
 
 ```
 Peekachu/
-├── Engine/                 # Go RCA Engine (Single-pass GROUPING SETS & factor decomposition)
-│   ├── main.go             # Microservice HTTP server & endpoints (/analyze, /detect)
-│   ├── engine.go           # Core RCA engine, baseline calculation & grouping sets SQL
-│   ├── db.go               # ClickHouse connection pool
-│   └── metrics.go          # Metric definitions & SQL expressions
-├── Backend/                # Fastify Orchestrator & LLM Integration
+├── Engine/                       # Native Go RCA Engine (Deterministic Core)
+│   ├── main.go                   # HTTP server & endpoints (/analyze, /detect, /health)
+│   ├── engine.go                 # Single-pass GROUPING SETS, Z-score, 2D drill-down logic
+│   ├── metrics.go                # Metric definitions & SQL expressions
+│   ├── db.go                     # ClickHouse connection pool
+│   └── README.md                 # Go RCA Engine Architecture Guide
+│
+├── Backend/                      # Fastify + LlamaIndex TS + Langfuse API Gateway
 │   ├── src/
-│   │   ├── instrumentation.ts # OpenTelemetry NodeSDK setup (peekachu-rca-backend)
-│   │   ├── index.ts        # Fastify server entrypoint
-│   │   ├── routes/         # API routes (v1/rca, v1/chat, simulation)
-│   │   └── services/       # Langfuse tracing, LlamaIndex, DeepSeek LLM
-│   ├── CLICKSTACK_TELEMETRY.md # Telemetry & ClickStack OTLP guide
-│   └── package.json
-├── frontend/               # React + Tailwind + Vite Dashboard
+│   │   ├── index.ts              # Main Fastify server entrypoint
+│   │   ├── instrumentation.ts    # OpenTelemetry NodeSDK (peekachu-rca-backend)
+│   │   ├── routes/v1/            # API endpoints (/rca, /chat, /dashboard, /deepseek)
+│   │   ├── scripts/
+│   │   │   ├── benchmarkGoEngine.ts # Go Engine performance benchmark script
+│   │   │   ├── evals.ts          # Evaluation runner
+│   │   │   └── populateRollup.ts # Hourly rollup table populator
+│   │   └── services/
+│   │       ├── langfuseRcaService.ts # End-to-end Langfuse trace manager & faithfulness scorer
+│   │       ├── llamaIndex.ts         # LlamaIndex TS integration & SummaryIndex query engine
+│   │       ├── agentService.ts       # ReAct agent service
+│   │       ├── clickhouseMcpClient.ts# ClickHouse MCP client for follow-up chat
+│   │       └── clickhouse.ts         # ClickHouse backend service
+│   ├── CLICKSTACK_TELEMETRY.md   # OpenTelemetry & ClickStack setup guide
+│   └── MCP_SETUP.md              # Model Context Protocol setup guide
+│
+├── frontend/                     # Modern React + Vite Dashboard
 │   ├── src/
-│   │   ├── components/     # RCA Workbench, AnomalyCards, LangfuseTracePanel
-│   │   ├── services/       # API integration
-│   │   └── types/          # Anomaly & Evidence TypeScript interfaces
-├── metrics_glossary.md     # Official InMobi metric formulas & revenue identity
-└── problem_statement.md    # Click-a-thon 2026 problem statement
->>>>>>> 05acfe8 (Documentation update)
+│   │   ├── components/rca/       # RCA Workbench, AnomalyCards, LangfuseTracePanel
+│   │   ├── services/             # API clients
+│   │   └── types/                # Evidence & anomaly TypeScript interfaces
+│
+├── flow.md                       # Architectural flow documentation
+├── metrics_glossary.md           # Business metric formulas & revenue identity equations
+└── problem_statement.md          # InMobi Click-a-thon 2026 challenge description
 ```
 
 ---
 
-<<<<<<< HEAD
-## 🚀 Quickstart Guide
+## 🚀 Quick Start & Benchmark Guide
 
 ### 1. Prerequisites
-- **Go** 1.22+
-- **Node.js** v20+ & `npm`
-- **ClickHouse** Cloud or Local Instance (`ad_events` dataset loaded)
-
-### 2. Start the Go RCA Engine
-```bash
-cd Engine
-go run main.go
-# 🚀 Listening on http://localhost:8081
-```
-
-### 3. Start the Backend API
-=======
-## 🚀 Quick Start Guide
-
-### 1. Prerequisites
-- **Node.js**: v18+ or v20+
 - **Go**: 1.22+ (`go version`)
+- **Node.js**: v18+ or v20+
 - **ClickHouse Cloud**: Active credentials in `.env`
 
-### 2. Environment Setup
+### 2. Environment Configuration
 Create a `.env` file in the root directory:
 
 ```env
@@ -303,52 +292,37 @@ CLICKHOUSE_PASSWORD=<YOUR_PASSWORD>
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 DEEPSEEK_API_KEY=<YOUR_DEEPSEEK_API_KEY>
 DEEPSEEK_MODEL=deepseek-chat
+LANGFUSE_PUBLIC_KEY=<YOUR_LANGFUSE_PUBLIC_KEY>
+LANGFUSE_SECRET_KEY=<YOUR_LANGFUSE_SECRET_KEY>
+LANGFUSE_HOST=https://cloud.langfuse.com
+RCA_ENGINE_URL=http://localhost:8081/analyze
 PORT=5001
 ```
 
-### 3. Start the Go RCA Engine
+### 3. Start the Native Go RCA Engine
 ```bash
 cd Engine
 go build -o rca-engine .
 ./rca-engine
 ```
-*Go RCA Engine runs on `http://localhost:8081`.*
+*Go RCA Engine listens on `http://localhost:8081`.*
 
-### 4. Start the Backend API & Telemetry
->>>>>>> 05acfe8 (Documentation update)
+### 4. Run the Go Engine Benchmark Script
+To verify why the Go Engine is a game-changer over legacy fan-outs:
+```bash
+cd Backend
+npm run benchmark:engine
+```
+
+### 5. Start the Backend API Gateway & Telemetry
 ```bash
 cd Backend
 npm install
 npm run dev
-<<<<<<< HEAD
-# 🚀 Fastify server listening on http://localhost:3000
 ```
+*Fastify API gateway runs on `http://localhost:5001` with OpenTelemetry auto-instrumentation.*
 
-### 4. Run Traffic & RCA Simulation
-```bash
-cd Backend
-npm run traffic
-```
-
----
-
-## 🏆 Hackathon Highlights (Click-a-thon 2026)
-
-- **Speed**: moving metrics diagnosed in **< 1 second**.
-- **Trustworthiness**: 100% reproducible math. LLM narration is strictly bound to evidence numbers.
-- **Explainability**: explicit **Ruled-Out List** to show judges what was checked and cleared.
-- **Traceability**: Every investigation generates an immutable trace in **Langfuse** and **ClickStack**.
-
----
-
-<p center align="center">
-  Built for <b>Click-a-thon 2026 (InMobi Challenge)</b>.
-</p>
-=======
-```
-*Fastify Backend runs on `http://localhost:5001` with OpenTelemetry initialized.*
-
-### 5. Start the Frontend UI
+### 6. Start the Frontend UI Dashboard
 ```bash
 cd frontend
 npm install
@@ -358,18 +332,16 @@ npm run dev
 
 ---
 
-## 📊 Benchmark & Performance Summary
-
-| Query Execution Method | Execution Time | Table Scans | Composite Key Match | Latency Gain |
-|---|---|---|---|---|
-| **Single-Pass `GROUP BY GROUPING SETS`** | **76.03 ms** | **1 Scan** | `(dim_name, dim_val)` | **2.67x Faster** 🚀 |
-| **Parallel Query Fan-Out** | 203.49 ms | 4 Scans | Ad-hoc | Baseline |
+## 📄 Documentation Links
+- [Go RCA Engine Architecture Guide](Engine/README.md)
+- [ClickStack & OpenTelemetry Setup Guide](Backend/CLICKSTACK_TELEMETRY.md)
+- [Model Context Protocol (MCP) Setup Guide](Backend/MCP_SETUP.md)
+- [Metrics Glossary & Revenue Identity](metrics_glossary.md)
+- [Problem Statement & Business Context](problem_statement.md)
+- [System Architectural Flow](flow.md)
 
 ---
 
-## 📄 Documentation Links
-- [ClickStack & OpenTelemetry Setup Guide](Backend/CLICKSTACK_TELEMETRY.md)
-- [Go RCA Engine Architecture](Engine/README.md)
-- [Metrics Glossary](metrics_glossary.md)
-- [Problem Statement](problem_statement.md)
->>>>>>> 05acfe8 (Documentation update)
+<p align="center">
+  Built with ❤️ for <b>InMobi Click-a-thon 2026</b>.
+</p>

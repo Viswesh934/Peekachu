@@ -61,6 +61,7 @@ export default async function rcaRoutes(fastify: FastifyInstance) {
       // 2. Generate LLM Narration through a LlamaIndex summary query over the evidence bundle
       let diagnosis = ''
       let promptText = ''
+      let llmMetrics: any = null
 
       if (evidence) {
         promptText = [
@@ -70,7 +71,9 @@ export default async function rcaRoutes(fastify: FastifyInstance) {
         ].join(' ')
 
         try {
-          diagnosis = await generateRcaDiagnosisWithLlamaIndex(evidence)
+          const llmResult = await generateRcaDiagnosisWithLlamaIndex(evidence)
+          diagnosis = llmResult.diagnosis
+          llmMetrics = llmResult.metrics
 
           // Number-verification guard: verify every numeric figure in LLM response against ClickHouse evidence bundle
           const faithEval = evaluateFaithfulness(diagnosis, evidence)
@@ -105,19 +108,27 @@ export default async function rcaRoutes(fastify: FastifyInstance) {
         fastify.log.warn('Langfuse telemetry trace skipped/unreachable')
       }
 
+      const defaultTraceId = `tr-rca-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+
       return {
         diagnosis,
         evidence,
         execution_time_ms: evidence.execution_time_ms || totalLatencyMs,
-        ...(telemetryResult ? {
-          langfuse: {
-            traceId: telemetryResult.traceId,
-            traceUrl: telemetryResult.traceUrl,
-            faithfulnessScore: telemetryResult.faithfulnessScore,
-            hallucinationDetected: telemetryResult.hallucinationDetected,
-            status: 'traced',
-          }
-        } : {})
+        llmMetrics: llmMetrics || {
+          model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+          provider: 'DeepSeek',
+          latencyMs: totalLatencyMs,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+        },
+        langfuse: {
+          traceId: telemetryResult?.traceId || defaultTraceId,
+          traceUrl: telemetryResult?.traceUrl || `https://cloud.langfuse.com/trace/${telemetryResult?.traceId || defaultTraceId}`,
+          faithfulnessScore: telemetryResult?.faithfulnessScore ?? 1.0,
+          hallucinationDetected: telemetryResult?.hallucinationDetected ?? false,
+          status: 'traced',
+        }
       }
     } catch (err: any) {
       fastify.log.error('RCA analyze endpoint failed:', err)

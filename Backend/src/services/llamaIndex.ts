@@ -57,7 +57,19 @@ export async function initializeIndex(): Promise<boolean> {
   }
 }
 
-export async function generateRcaDiagnosisWithLlamaIndex(evidence: any): Promise<string> {
+export interface LlmNarrationResult {
+  diagnosis: string;
+  metrics: {
+    model: string;
+    provider: string;
+    latencyMs: number;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+
+export async function generateRcaDiagnosisWithLlamaIndex(evidence: any): Promise<LlmNarrationResult> {
   if (!Settings.llm) {
     throw new Error("LlamaIndex LLM is not configured");
   }
@@ -98,6 +110,9 @@ export async function generateRcaDiagnosisWithLlamaIndex(evidence: any): Promise
   const summaryIndex = await SummaryIndex.fromDocuments([evidenceDocument]);
   const queryEngine = summaryIndex.asQueryEngine();
 
+  const llmModel = (process.env.DEEPSEEK_MODEL as string) || "deepseek-chat";
+  const startMs = Date.now();
+
   const result = await queryEngine.query({
     query: [
       "You are the RCA narrator for an ad-tech anomaly investigation.",
@@ -111,5 +126,23 @@ export async function generateRcaDiagnosisWithLlamaIndex(evidence: any): Promise
     ].join(" "),
   });
 
-  return result.response;
+  const latencyMs = Date.now() - startMs;
+
+  // Extract token usage from the raw LLM response if available
+  const rawUsage = (result as any)?.sourceNodes?.[0]?.metadata?.usage ||
+    (result as any)?.metadata?.usage ||
+    (result as any)?.response?.raw?.usage ||
+    {};
+
+  return {
+    diagnosis: result.response,
+    metrics: {
+      model: llmModel,
+      provider: "DeepSeek",
+      latencyMs,
+      promptTokens: rawUsage?.prompt_tokens ?? 0,
+      completionTokens: rawUsage?.completion_tokens ?? 0,
+      totalTokens: rawUsage?.total_tokens ?? 0,
+    },
+  };
 }

@@ -46,6 +46,15 @@ export interface LangfuseTelemetry {
   executionTimeMs?: number;
 }
 
+export interface LlmMetrics {
+  model: string;
+  latencyMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  provider: string;
+}
+
 export interface RCAEvidence {
   anomaly_detected: boolean;
   metric: string;
@@ -77,6 +86,7 @@ export interface AnomalyIncident {
   evidence: RCAEvidence;
   diagnosisText: string;
   langfuse?: LangfuseTelemetry;
+  llmMetrics?: LlmMetrics;
   humanReview: HumanReview;
 }
 

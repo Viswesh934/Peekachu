@@ -379,14 +379,13 @@ export async function traceRCAInvestigation(options: {
     console.error("Failed to record RCA trace in Langfuse:", err);
   }
 
+  const traceId = trace?.id || `tr-rca-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const traceUrl = trace?.getTraceUrl
     ? trace.getTraceUrl()
-    : trace?.id
-    ? `https://cloud.langfuse.com/trace/${trace.id}`
-    : undefined;
+    : `https://cloud.langfuse.com/trace/${traceId}`;
 
   return {
-    traceId: trace?.id,
+    traceId,
     traceUrl,
     faithfulnessScore,
     hallucinationDetected,

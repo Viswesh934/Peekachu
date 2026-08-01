@@ -76,6 +76,18 @@ export function App() {
     showToast(`Anomaly ${id} FLAGGED as AI Hallucination! Feedback sent to Langfuse.`);
   };
 
+  const handleUpdateAnomaly = (updated: AnomalyIncident) => {
+    setAnomalies((prev) => {
+      const idx = prev.findIndex((a) => a.id === updated.id);
+      if (idx !== -1) {
+        const next = [...prev];
+        next[idx] = updated;
+        return next;
+      }
+      return [updated, ...prev];
+    });
+  };
+
   const pendingCount = anomalies.filter((a) => a.humanReview.status === 'PENDING').length;
 
   return (
@@ -112,6 +124,7 @@ export function App() {
                 anomalies={anomalies}
                 onApprove={handleApprove}
                 onFlagHallucination={handleFlagHallucination}
+                onUpdateAnomaly={handleUpdateAnomaly}
               />
             ) : (
               <DashboardView

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LangfuseTelemetry } from '../../types';
+import { LangfuseTelemetry, LlmMetrics } from '../../types';
 import {
   Terminal,
   ExternalLink,
@@ -17,6 +17,7 @@ import {
 interface LangfuseTracePanelProps {
   telemetry?: LangfuseTelemetry;
   executionTimeMs?: number;
+  llmMetrics?: LlmMetrics;
   onClose: () => void;
 }
 
@@ -76,11 +77,13 @@ const COLOR_MAP: Record<string, { bg: string; border: string; text: string; bar:
   violet:  { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-700',  bar: 'bg-violet-400',  dot: 'bg-violet-500' },
 };
 
-export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetry, executionTimeMs, onClose }) => {
+export const LangfuseTracePanel: React.FC<LangfuseTracePanelProps> = ({ telemetry, executionTimeMs, llmMetrics, onClose }) => {
   const faithfulness = (telemetry?.faithfulnessScore ?? 1.0) * 100;
   const totalLatency = executionTimeMs ?? telemetry?.executionTimeMs ?? 434;
-  // LLM accounts for ~20% of total pipeline latency
-  const llmLatency = Math.round(totalLatency * 0.2);
+  // Use real llmMetrics latency if available, otherwise estimate as ~20% of total
+  const llmLatency = llmMetrics?.latencyMs ?? Math.round(totalLatency * 0.2);
+  const llmModel = llmMetrics?.model ?? 'deepseek-chat';
+  const llmProvider = llmMetrics?.provider ?? 'DeepSeek';
   const traceId = telemetry?.traceId ?? 'trace-active-session';
   const traceUrl = telemetry?.traceUrl ?? (telemetry?.traceId ? `https://cloud.langfuse.com/trace/${telemetry.traceId}` : 'https://cloud.langfuse.com');
   const isHighFidelity = faithfulness >= 95;

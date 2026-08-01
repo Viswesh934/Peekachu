@@ -35,6 +35,7 @@ interface Props {
   onFlagHallucination: (id: string, reason: string, feedback: string) => void;
   onOpenLangfuseTrace: () => void;
   onOpenChatAgent: () => void;
+  onAnalysisComplete?: (updated: AnomalyIncident) => void;
   isTraceOpen?: boolean;
 }
 
@@ -52,6 +53,7 @@ export const RcaDetailDrawer: React.FC<Props> = ({
   onApprove,
   onFlagHallucination,
   onOpenLangfuseTrace,
+  onAnalysisComplete,
   isTraceOpen,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -70,9 +72,9 @@ export const RcaDetailDrawer: React.FC<Props> = ({
 
   const getDefaultWindowTimes = () => {
     const now = new Date();
-    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     return {
-      start: formatDateToLocalISO(oneHourAgo),
+      start: formatDateToLocalISO(yesterday),
       end: formatDateToLocalISO(now),
     };
   };
@@ -87,8 +89,8 @@ export const RcaDetailDrawer: React.FC<Props> = ({
   };
 
   const defaults = getDefaultWindowTimes();
-  const [windowStart, setWindowStart] = useState(toDatetimeLocal(anomaly?.window_start, defaults.start));
-  const [windowEnd, setWindowEnd] = useState(toDatetimeLocal(anomaly?.window_end, defaults.end));
+  const [windowStart, setWindowStart] = useState(defaults.start);
+  const [windowEnd, setWindowEnd] = useState(defaults.end);
   const [isRunningAnalysis, setIsRunningAnalysis] = useState(false);
   const [showRawJson, setShowRawJson] = useState(false);
 
@@ -124,7 +126,10 @@ export const RcaDetailDrawer: React.FC<Props> = ({
       return formatted.substring(0, 19);
     };
     const result = await triggerRcaAnalysis(liveAnomaly.metric || 'revenue', toApiTs(windowStart), toApiTs(windowEnd));
-    setLiveAnomaly({ ...result, id: anomaly.id, humanReview: anomaly.humanReview });
+    const updated = { ...result, id: anomaly.id, humanReview: anomaly.humanReview };
+    setLiveAnomaly(updated);
+    // Notify parent so trace panel (and other consumers) get the fresh langfuse data
+    onAnalysisComplete?.(updated);
     setTimeout(() => setIsRunningAnalysis(false), 1200);
   };
 
@@ -328,7 +333,18 @@ export const RcaDetailDrawer: React.FC<Props> = ({
               <div className="flex items-center gap-2 mb-2">
                 <FileText className="w-3.5 h-3.5 text-brand-500" />
                 <h4 className="text-[12px] font-semibold text-slate-800">AI Diagnosis</h4>
-                <span className="mono-pill ml-auto">DeepSeek · Verbatim</span>
+                {/* Dynamic model pill — reads from actual llmMetrics */}
+                <span className="mono-pill ml-auto">
+                  {liveAnomaly.llmMetrics?.provider ?? 'DeepSeek'}
+                  {' · '}
+                  {liveAnomaly.llmMetrics?.model ?? (process.env.DEEPSEEK_MODEL || 'deepseek-chat')}
+                  {' · Verbatim'}
+                </span>
+                {liveAnomaly.llmMetrics?.latencyMs != null && (
+                  <span className="mono-pill text-amber-700 border-amber-200 bg-amber-50">
+                    {liveAnomaly.llmMetrics.latencyMs}ms
+                  </span>
+                )}
               </div>
               <div className="text-[13px] text-slate-700 leading-relaxed bg-white border border-slate-200 rounded-lg p-4 prose prose-slate prose-sm max-w-none shadow-sm
                 [&_strong]:text-slate-900 [&_strong]:font-semibold
@@ -344,6 +360,57 @@ export const RcaDetailDrawer: React.FC<Props> = ({
               ">
                 <ReactMarkdown>{liveAnomaly.diagnosisText}</ReactMarkdown>
               </div>
+
+              {/* LLM Metrics strip — dynamic, populated from backend response */}
+              {liveAnomaly.llmMetrics && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200">
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mr-1">LLM Metrics</span>
+
+                  <div className="flex items-center gap-1 px-2 py-1 rounded bg-violet-50 border border-violet-200">
+                    <Zap className="w-3 h-3 text-violet-500" />
+                    <span className="font-mono text-[11px] text-violet-700 font-semibold">
+                      {liveAnomaly.llmMetrics.latencyMs}ms
+                    </span>
+                    <span className="text-[10px] text-violet-400 ml-0.5">latency</span>
+                  </div>
+
+                  <div className="flex items-center gap-1 px-2 py-1 rounded bg-blue-50 border border-blue-200">
+                    <span className="text-[10px] text-blue-400">prompt</span>
+                    <span className="font-mono text-[11px] text-blue-700 font-semibold">
+                      {liveAnomaly.llmMetrics.promptTokens > 0
+                        ? liveAnomaly.llmMetrics.promptTokens
+                        : '—'}
+                    </span>
+                    <span className="text-[10px] text-blue-400">tok</span>
+                  </div>
+
+                  <div className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-50 border border-emerald-200">
+                    <span className="text-[10px] text-emerald-400">completion</span>
+                    <span className="font-mono text-[11px] text-emerald-700 font-semibold">
+                      {liveAnomaly.llmMetrics.completionTokens > 0
+                        ? liveAnomaly.llmMetrics.completionTokens
+                        : '—'}
+                    </span>
+                    <span className="text-[10px] text-emerald-400">tok</span>
+                  </div>
+
+                  <div className="flex items-center gap-1 px-2 py-1 rounded bg-amber-50 border border-amber-200">
+                    <span className="text-[10px] text-amber-500">total</span>
+                    <span className="font-mono text-[11px] text-amber-700 font-semibold">
+                      {liveAnomaly.llmMetrics.totalTokens > 0
+                        ? liveAnomaly.llmMetrics.totalTokens
+                        : '—'}
+                    </span>
+                    <span className="text-[10px] text-amber-400">tok</span>
+                  </div>
+
+                  <div className="ml-auto flex items-center gap-1 px-2 py-1 rounded bg-slate-100 border border-slate-200">
+                    <span className="font-mono text-[11px] text-slate-600 font-semibold">
+                      {liveAnomaly.llmMetrics.provider} / {liveAnomaly.llmMetrics.model}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
