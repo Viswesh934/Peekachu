@@ -1,15 +1,5 @@
 # ==========================================
-# Stage 1: Build React Frontend
-# ==========================================
-FROM node:20-alpine AS frontend-builder
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
-
-# ==========================================
-# Stage 2: Build Go RCA Engine
+# Stage 1: Build Go RCA Engine
 # ==========================================
 FROM golang:1.23-alpine AS engine-builder
 WORKDIR /app/engine
@@ -19,7 +9,7 @@ COPY Engine/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o rca-engine .
 
 # ==========================================
-# Stage 3: Build Fastify TypeScript Backend
+# Stage 2: Build Fastify Backend
 # ==========================================
 FROM node:20-alpine AS backend-builder
 WORKDIR /app/backend
@@ -29,31 +19,26 @@ COPY Backend/ ./
 RUN npm run build
 
 # ==========================================
-# Stage 4: Production Runtime Image
+# Stage 3: Production Runtime Image for Render
 # ==========================================
 FROM node:20-alpine
-
-# Install Nginx
-RUN apk add --no-cache nginx
-
 WORKDIR /app
 
-# Copy Frontend static build to Nginx directory
-COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
-
 # Copy Go Engine executable
-COPY --from=engine-builder /app/engine/rca-engine /app/engine/rca-engine
+COPY --from=engine-builder /app/engine/rca-engine /app/rca-engine
 
-# Copy Backend compiled code and node_modules
-COPY --from=backend-builder /app/backend/dist /app/backend/dist
-COPY --from=backend-builder /app/backend/node_modules /app/backend/node_modules
-COPY --from=backend-builder /app/backend/package.json /app/backend/package.json
+# Copy Backend compiled code and dependencies
+COPY --from=backend-builder /app/backend/dist /app/dist
+COPY --from=backend-builder /app/backend/node_modules /app/node_modules
+COPY --from=backend-builder /app/backend/package.json /app/package.json
 
-# Copy Nginx config and entrypoint script
-COPY nginx.conf /etc/nginx/http.d/default.conf
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Environment variables for Render
+ENV HOST=0.0.0.0
+ENV PORT=10000
+ENV RCA_ENGINE_PORT=8081
+ENV RCA_ENGINE_URL=http://127.0.0.1:8081/analyze
 
-EXPOSE 80 5001 8081
+EXPOSE 10000
 
-CMD ["/entrypoint.sh"]
+# Start Go Engine in background, then start Fastify Node Backend
+CMD ["sh", "-c", "/app/rca-engine & sleep 1 && exec node /app/dist/index.js"]
