@@ -1,12 +1,12 @@
 # ==========================================
 # Stage 1: Build Go RCA Engine
 # ==========================================
-FROM golang:1.22-alpine AS engine-builder
+FROM golang:1.23-alpine AS engine-builder
 WORKDIR /app/engine
 COPY Engine/go.mod Engine/go.sum ./
 RUN go mod download
 COPY Engine/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -o rca-engine main.go db.go engine.go metrics.go types.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o rca-engine .
 
 # ==========================================
 # Stage 2: Build Fastify Backend
