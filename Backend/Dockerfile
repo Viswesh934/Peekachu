@@ -32,11 +32,7 @@ COPY --from=backend-builder /app/backend/dist /app/dist
 COPY --from=backend-builder /app/backend/node_modules /app/node_modules
 COPY --from=backend-builder /app/backend/package.json /app/package.json
 
-# Copy startup script
-COPY Backend/render-start.sh /app/render-start.sh
-RUN chmod +x /app/render-start.sh
-
-# Environment variables
+# Environment variables for Render
 ENV HOST=0.0.0.0
 ENV PORT=10000
 ENV RCA_ENGINE_PORT=8081
@@ -44,4 +40,5 @@ ENV RCA_ENGINE_URL=http://127.0.0.1:8081/analyze
 
 EXPOSE 10000
 
-CMD ["/app/render-start.sh"]
+# Start Go Engine in background, then start Fastify Node Backend
+CMD ["sh", "-c", "/app/rca-engine & sleep 1 && exec node /app/dist/index.js"]
