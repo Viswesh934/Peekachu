@@ -1,6 +1,6 @@
 module rca-engine
 
-go 1.26.1
+go 1.22
 
 require github.com/ClickHouse/clickhouse-go/v2 v2.47.0
 
