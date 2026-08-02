@@ -1,6 +1,6 @@
 import { AnomalyIncident, ChatMessage, FactorDecomposition, LangfuseTelemetry, RCAEvidence, MetricSummary, TimeSeriesPoint } from '../types';
 
-const BACKEND_BASE_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined) || '/api';
+const BACKEND_BASE_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined) || 'http://localhost:5001';
 const DEFAULT_METRIC = 'revenue';
 
 type BackendDetectRecord = {

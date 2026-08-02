@@ -1,7 +1,8 @@
 # ==========================================
 # Stage 1: Build Go RCA Engine
 # ==========================================
-FROM golang:1.23-alpine AS engine-builder
+FROM golang:1.24-alpine AS engine-builder
+ENV GOTOOLCHAIN=auto
 WORKDIR /app/engine
 COPY Engine/go.mod Engine/go.sum ./
 RUN go mod download
